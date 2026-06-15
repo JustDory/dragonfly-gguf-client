@@ -45,24 +45,29 @@ of nodes downloading the same model doesn't hammer Hugging Face N times.
 
 ## 🎬 Demo
 
-Real output from a local two-peer cluster (a `client` peer pulling from a `seed-client`):
+A `client` peer pulling a GGUF model from a `seed-client` over P2P, then verifying it against the
+source `sha256` — recorded from a real local cluster:
+
+<p align="center">
+  <img src="docs/demo.gif" alt="dfget downloading a GGUF model over Dragonfly P2P and verifying its sha256" width="100%">
+</p>
 
 ```console
 $ dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf -O /tmp/model.gguf
 
-INFO load [gguf] builtin backend
-INFO start to download piece ...-93 from parent "172.30.0.7-...-seed"
-INFO finished piece ...-93 from parent "...-seed" using protocol tcp
-INFO all pieces are downloaded with scheduler
-INFO download task succeeded
+INFO download file to: /tmp/model.gguf
+INFO flush "/tmp/model.gguf" success
+INFO verifying "/tmp/model.gguf" against source sha256 ca7490f0…a3ed4a
+INFO gguf integrity check passed for "/tmp/model.gguf"
 
-$ ls -l /tmp/model.gguf
--rw-r--r-- 397805248  /tmp/model.gguf          # ~379 MB
-$ head -c 4 /tmp/model.gguf | xxd
-00000000: 4747 5546                    GGUF      # valid GGUF magic
+$ ls -lh /tmp/model.gguf  &&  head -c4 /tmp/model.gguf
+380M  /tmp/model.gguf
+magic bytes: GGUF
+
+# pieces served peer-to-peer from the seed peer (dfdaemon, protocol tcp):
+finished piece 31daef4c…-3 from parent
+finished piece 31daef4c…-4 from parent
 ```
-
-<!-- Tip: record an asciinema cast of the above and embed it here for an animated demo. -->
 
 ## 🧭 How it works
 
