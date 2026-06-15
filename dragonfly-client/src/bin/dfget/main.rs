@@ -25,7 +25,7 @@ use dragonfly_client::grpc::{dfdaemon_download::DfdaemonDownloadClient, health::
 use dragonfly_client::resource::piece::MIN_PIECE_LENGTH;
 use dragonfly_client::tracing::init_command_tracing;
 use dragonfly_client_backend::{
-    gguf, hdfs, hugging_face, model_scope, object_storage, BackendFactory, DirEntry,
+    gguf, hdfs, hugging_face, model_scope, object_storage, BackendFactory, DirEntry, StatRequest,
 };
 use dragonfly_client_config::VersionValueParser;
 use dragonfly_client_config::{self, dfdaemon, dfget};
@@ -1051,6 +1051,19 @@ async fn download(
         None
     };
 
+    // Capture the inputs for the post-download gguf integrity check before `args` fields are
+    // moved into the download request below.
+    let gguf_verification = (url.scheme() == gguf::SCHEME).then(|| GgufVerification {
+        url: args.url.to_string(),
+        output: args.output.clone(),
+        hugging_face: HuggingFace {
+            revision: args.hf_revision.clone(),
+            token: args.hf_token.clone(),
+            base_url: args.hf_base_url.clone(),
+        },
+        timeout: args.timeout,
+    });
+
     // If the `filtered_query_params` is not provided, then use the default value.
     let filtered_query_params = args
         .filtered_query_params
@@ -1270,8 +1283,117 @@ async fn download(
     };
     info!("flush {:?} success", args.output);
 
+    // For gguf:// downloads, verify the downloaded file against the Hugging Face LFS sha256
+    // (exposed via the X-Linked-Etag header). P2P transit corruption is already caught by
+    // Dragonfly's per-piece digests; this is a best-effort, end-to-end source-integrity check.
+    // A missing/unavailable digest is logged and skipped; only an actual mismatch is fatal.
+    if let Some(verification) = gguf_verification {
+        if let Err(err) = verify_downloaded_gguf(&verification).await {
+            error!("gguf integrity check failed: {}", err);
+            fs::remove_file(&verification.output).await.inspect_err(|e| {
+                error!("remove file {:?} failed: {}", verification.output, e);
+            })?;
+
+            return Err(err);
+        }
+    }
+
     progress_bar.finish();
     Ok(())
+}
+
+/// GgufVerification holds the inputs needed to verify a downloaded gguf:// file after download.
+struct GgufVerification {
+    /// URL is the original gguf:// URL.
+    url: String,
+
+    /// Output is the path the file was written to.
+    output: PathBuf,
+
+    /// Hugging Face options to reuse for the metadata `stat` request.
+    hugging_face: HuggingFace,
+
+    /// Timeout for the metadata `stat` request.
+    timeout: Duration,
+}
+
+/// Verifies a downloaded gguf:// file against its Hugging Face LFS sha256 digest.
+///
+/// The digest is fetched from the backend's `stat` headers (`X-Linked-Etag`). If the digest
+/// cannot be determined (for example, Hugging Face did not expose it, or the `stat` call
+/// failed), verification is skipped with a warning rather than failing the download — P2P
+/// integrity is already guaranteed per-piece. Only a confirmed digest mismatch returns an error.
+async fn verify_downloaded_gguf(verification: &GgufVerification) -> Result<()> {
+    let expected_sha256 = match fetch_expected_sha256(verification).await {
+        Some(digest) => digest,
+        None => {
+            warn!(
+                "skipping gguf integrity check for {:?}: no sha256 digest available from source",
+                verification.output
+            );
+            return Ok(());
+        }
+    };
+
+    info!(
+        "verifying {:?} against source sha256 {}",
+        verification.output, expected_sha256
+    );
+    gguf::verify_gguf_digest(&expected_sha256, &verification.output)?;
+    info!("gguf integrity check passed for {:?}", verification.output);
+    Ok(())
+}
+
+/// Fetches the expected sha256 digest for a gguf:// URL from the backend metadata.
+///
+/// Builds a backend for the URL and issues a `stat` request (reusing the same Hugging Face
+/// options as the download), then extracts the sha256 from the response headers. Returns
+/// `None` if the backend or `stat` call fails, or if no usable digest header is present.
+async fn fetch_expected_sha256(verification: &GgufVerification) -> Option<String> {
+    let backend_factory = match BackendFactory::new(Arc::new(dfdaemon::Config::default()), None) {
+        Ok(factory) => factory,
+        Err(err) => {
+            warn!(
+                "failed to create backend factory for gguf integrity check: {}",
+                err
+            );
+            return None;
+        }
+    };
+
+    let backend = match backend_factory.build(verification.url.as_str()) {
+        Ok(backend) => backend,
+        Err(err) => {
+            warn!("failed to build backend for gguf integrity check: {}", err);
+            return None;
+        }
+    };
+
+    let response = match backend
+        .stat(StatRequest {
+            task_id: Uuid::new_v4().to_string(),
+            url: verification.url.clone(),
+            http_header: None,
+            timeout: verification.timeout,
+            client_cert: None,
+            object_storage: None,
+            hdfs: None,
+            hugging_face: Some(verification.hugging_face.clone()),
+            model_scope: None,
+        })
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            warn!("stat request for gguf integrity check failed: {}", err);
+            return None;
+        }
+    };
+
+    response
+        .http_header
+        .as_ref()
+        .and_then(gguf::expected_sha256)
 }
 
 /// Retrieves all directory entries from a remote storage location.
