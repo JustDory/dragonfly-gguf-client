@@ -51,7 +51,7 @@ use dragonfly_client_core::{
     Error, Result,
 };
 use dragonfly_client_util::digest::{verify_file_digest, Algorithm, Digest};
-use reqwest::header::{HeaderMap, ETAG};
+use reqwest::header::HeaderMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
@@ -251,17 +251,17 @@ impl GgufMetadata {
     }
 }
 
-/// expected_sha256 extracts the sha256 (hex) that Hugging Face advertises for a file.
-/// For LFS-backed files (which all real GGUF models are), HF returns the object's
-/// sha256 in the `X-Linked-Etag` header; for small non-LFS files it is the `ETag`.
-/// The value is quoted and may carry a weak-validator `W/` prefix. Returns `None` if
-/// no header looks like a sha256.
+/// expected_sha256 extracts the file's sha256 (hex) that Hugging Face advertises in the
+/// `X-Linked-Etag` header. For LFS-backed files (which all real GGUF models are), HF returns
+/// the object's sha256 there on the *redirect* response from `huggingface.co`.
+///
+/// The plain `ETag` is intentionally **not** used as a fallback: once a request follows the
+/// redirect to the storage CDN, the CDN's `ETag` is a storage-layer hash (e.g. the Xet CAS
+/// hash) that does **not** equal the file's sha256, so trusting it would flag good downloads
+/// as corrupt. The value is quoted and may carry a weak-validator `W/` prefix. Returns `None`
+/// if the header is absent or does not look like a sha256.
 pub fn expected_sha256(headers: &HeaderMap) -> Option<String> {
-    let raw = headers
-        .get("x-linked-etag")
-        .or_else(|| headers.get(ETAG))?
-        .to_str()
-        .ok()?;
+    let raw = headers.get("x-linked-etag")?.to_str().ok()?;
 
     let cleaned = raw.trim().trim_start_matches("W/").trim_matches('"');
     if cleaned.len() == 64 && cleaned.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -364,6 +364,15 @@ impl Gguf {
 
         GgufMetadata::parse(&buffer)
     }
+
+    /// fetch_expected_sha256 validates and rewrites the `gguf://` URL, then asks the inner
+    /// Hugging Face backend for the file's advertised sha256 (via its non-redirecting
+    /// `X-Linked-Etag` lookup). Returns `None` when no sha256 is advertised, so callers can
+    /// treat post-download integrity verification as best-effort.
+    pub async fn fetch_expected_sha256(&self, mut request: StatRequest) -> Option<String> {
+        request.url = Self::rewrite_url(&request.url).ok()?;
+        self.inner.fetch_linked_sha256(request).await
+    }
 }
 
 /// Backend implementation for GGUF.
@@ -402,7 +411,7 @@ impl Backend for Gguf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::header::HeaderValue;
+    use reqwest::header::{HeaderValue, ETAG};
 
     // --- URL handling (#6: deterministic rewrite -> stable task ids) ---
 
@@ -590,6 +599,20 @@ mod tests {
     fn test_expected_sha256_none_for_non_hash_etag() {
         let mut headers = HeaderMap::new();
         headers.insert(ETAG, HeaderValue::from_static("\"not-a-sha\""));
+        assert_eq!(expected_sha256(&headers), None);
+    }
+
+    #[test]
+    fn test_expected_sha256_ignores_cdn_etag() {
+        // The storage CDN behind HF's redirect returns a 64-hex `ETag` that is a storage-layer
+        // hash (e.g. the Xet CAS hash), NOT the file's sha256. It must never be trusted as the
+        // digest, otherwise good downloads would be flagged corrupt. Only `X-Linked-Etag` counts.
+        let cdn_etag = "7f7d0d201867e4db88208de45cd7987239981cc7591988edd13cd92796e4cfce";
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            ETAG,
+            HeaderValue::from_str(&format!("\"{cdn_etag}\"")).unwrap(),
+        );
         assert_eq!(expected_sha256(&headers), None);
     }
 

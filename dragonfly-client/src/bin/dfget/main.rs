@@ -1346,31 +1346,20 @@ async fn verify_downloaded_gguf(verification: &GgufVerification) -> Result<()> {
 
 /// Fetches the expected sha256 digest for a gguf:// URL from the backend metadata.
 ///
-/// Builds a backend for the URL and issues a `stat` request (reusing the same Hugging Face
-/// options as the download), then extracts the sha256 from the response headers. Returns
-/// `None` if the backend or `stat` call fails, or if no usable digest header is present.
+/// Builds a `gguf` backend and asks it for the file's advertised sha256 (a non-redirecting
+/// `X-Linked-Etag` lookup against Hugging Face, reusing the same Hugging Face options as the
+/// download). Returns `None` if the backend cannot be built or no sha256 is advertised.
 async fn fetch_expected_sha256(verification: &GgufVerification) -> Option<String> {
-    let backend_factory = match BackendFactory::new(Arc::new(dfdaemon::Config::default()), None) {
-        Ok(factory) => factory,
-        Err(err) => {
-            warn!(
-                "failed to create backend factory for gguf integrity check: {}",
-                err
-            );
-            return None;
-        }
-    };
-
-    let backend = match backend_factory.build(verification.url.as_str()) {
+    let backend = match gguf::Gguf::new(Arc::new(dfdaemon::Config::default())) {
         Ok(backend) => backend,
         Err(err) => {
-            warn!("failed to build backend for gguf integrity check: {}", err);
+            warn!("failed to build gguf backend for integrity check: {}", err);
             return None;
         }
     };
 
-    let response = match backend
-        .stat(StatRequest {
+    backend
+        .fetch_expected_sha256(StatRequest {
             task_id: Uuid::new_v4().to_string(),
             url: verification.url.clone(),
             http_header: None,
@@ -1382,18 +1371,6 @@ async fn fetch_expected_sha256(verification: &GgufVerification) -> Option<String
             model_scope: None,
         })
         .await
-    {
-        Ok(response) => response,
-        Err(err) => {
-            warn!("stat request for gguf integrity check failed: {}", err);
-            return None;
-        }
-    };
-
-    response
-        .http_header
-        .as_ref()
-        .and_then(gguf::expected_sha256)
 }
 
 /// Retrieves all directory entries from a remote storage location.

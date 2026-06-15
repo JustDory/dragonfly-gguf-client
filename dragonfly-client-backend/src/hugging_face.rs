@@ -348,6 +348,42 @@ impl HuggingFace {
 
         Ok(request_header)
     }
+
+    /// Fetches the LFS sha256 that Hugging Face advertises for a single file.
+    ///
+    /// Issues a HEAD to the file's `resolve` URL **without following redirects** and reads the
+    /// `X-Linked-Etag` header on the redirect response, which is the file's true sha256.
+    /// Following the redirect would land on the storage CDN, whose `ETag` is a storage-layer
+    /// hash (e.g. the Xet CAS hash) rather than the file's sha256 — so a non-redirecting request
+    /// is required to obtain the correct digest. Returns `None` on any error or when no sha256 is
+    /// advertised; callers treat integrity verification as best-effort.
+    pub async fn fetch_linked_sha256(&self, request: StatRequest) -> Option<String> {
+        let hugging_face = request.hugging_face.as_ref()?;
+        let parsed_url = ParsedURL::try_from(request.url.as_str()).ok()?;
+        let file_path = parsed_url.file_path.as_ref()?;
+        let (base_url, _) = Self::resolve_base_urls(hugging_face.base_url.as_deref()).ok()?;
+        let download_url =
+            Self::build_download_url(&parsed_url, file_path, &hugging_face.revision, &base_url)
+                .ok()?;
+        let request_header = Self::build_request_headers(hugging_face.token.clone(), None).ok()?;
+
+        // A dedicated client that does NOT follow redirects, so the `X-Linked-Etag` on the 302
+        // from huggingface.co is preserved (the CDN behind the redirect does not carry it).
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .ok()?;
+
+        let response = client
+            .head(download_url.as_str())
+            .headers(request_header)
+            .timeout(request.timeout)
+            .send()
+            .await
+            .ok()?;
+
+        crate::gguf::expected_sha256(response.headers())
+    }
 }
 
 /// Backend implementation for Hugging Face.
