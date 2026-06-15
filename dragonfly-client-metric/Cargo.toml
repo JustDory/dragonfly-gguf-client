@@ -19,4 +19,4 @@ tokio.workspace = true
 tracing.workspace = true
 warp.workspace = true
 fs2.workspace = true
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
