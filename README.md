@@ -33,32 +33,41 @@ of nodes downloading the same model doesn't hammer Hugging Face N times.
 - **GGUF header metadata** — parse architecture, name, quantization (`general.file_type`), and
   tensor/KV counts from a GGUF file, including via a **range request** that reads just the header
   without downloading the whole model.
-- **Integrity verification** — extract Hugging Face's LFS `sha256` (`X-Linked-Etag`) and verify a
-  downloaded file against it, reusing Dragonfly's shared digest utilities.
+- **Integrity verification** — after a `gguf://` download, `dfget` fetches the file's source
+  `sha256` from Hugging Face (the LFS `X-Linked-Etag`, read without following the storage
+  redirect) and verifies the downloaded file against it, deleting it on mismatch. Dragonfly already
+  guarantees per-piece P2P integrity; this adds an end-to-end source-corruption / wrong-file check.
+  It is best-effort: if no digest is advertised the check is skipped, and only a confirmed mismatch
+  fails the download.
 - **Deterministic, cache-friendly** — the same `gguf://` URL always maps to the same task, so peers
   share pieces instead of re-downloading.
 - **Reuses Hugging Face auth** — `--hf-token`, `--hf-revision`, and `--hf-base-url` all apply.
 
 ## 🎬 Demo
 
-Real output from a local two-peer cluster (a `client` peer pulling from a `seed-client`):
+A `client` peer pulling a GGUF model from a `seed-client` over P2P, then verifying it against the
+source `sha256` — recorded from a real local cluster:
+
+<p align="center">
+  <img src="docs/demo.gif" alt="dfget downloading a GGUF model over Dragonfly P2P and verifying its sha256" width="100%">
+</p>
 
 ```console
 $ dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf -O /tmp/model.gguf
 
-INFO load [gguf] builtin backend
-INFO start to download piece ...-93 from parent "172.30.0.7-...-seed"
-INFO finished piece ...-93 from parent "...-seed" using protocol tcp
-INFO all pieces are downloaded with scheduler
-INFO download task succeeded
+INFO download file to: /tmp/model.gguf
+INFO flush "/tmp/model.gguf" success
+INFO verifying "/tmp/model.gguf" against source sha256 ca7490f0…a3ed4a
+INFO gguf integrity check passed for "/tmp/model.gguf"
 
-$ ls -l /tmp/model.gguf
--rw-r--r-- 397805248  /tmp/model.gguf          # ~379 MB
-$ head -c 4 /tmp/model.gguf | xxd
-00000000: 4747 5546                    GGUF      # valid GGUF magic
+$ ls -lh /tmp/model.gguf  &&  head -c4 /tmp/model.gguf
+380M  /tmp/model.gguf
+magic bytes: GGUF
+
+# pieces served peer-to-peer from the seed peer (dfdaemon, protocol tcp):
+finished piece 31daef4c…-3 from parent
+finished piece 31daef4c…-4 from parent
 ```
-
-<!-- Tip: record an asciinema cast of the above and embed it here for an animated demo. -->
 
 ## 🧭 How it works
 
@@ -104,7 +113,6 @@ registered alongside the other schemes (`hf`, `s3`, `http`, …) in the backend 
 ### Build from source
 
 ```shell
-# Private repo: authenticate first (e.g. `gh auth login`).
 git clone https://github.com/JustDory/dragonfly-gguf-client.git
 cd dragonfly-gguf-client
 
@@ -181,13 +189,16 @@ with this fork's client image substituted for the peers.
 ## 🗺️ Roadmap
 
 - [x] `gguf://` backend with `.gguf` validation and P2P distribution
-- [x] GGUF header metadata parsing
-- [x] Hugging Face LFS `sha256` integrity verification
-- [ ] Wire metadata + hash verification into the `dfdaemon` download path
+- [x] GGUF header metadata parsing (library)
+- [x] Hugging Face LFS `sha256` integrity verification — wired into the `dfget` download path
+- [ ] Surface parsed GGUF metadata (architecture / quantization) on the CLI
 - [ ] Recursive repo download (`gguf://owner/repo` → every `.gguf` in the repo)
 - [ ] Sharded / multi-part GGUF (`model-00001-of-0000N.gguf`)
 - [ ] Seed-peer **preheat** for popular GGUF models
 - [ ] `dfctl` support for the `gguf` scheme
+- [ ] **Model discovery** — browse available models in a paged list
+- [ ] **Sorting** — order the model list by *trending* and *most seeds* (P2P availability)
+- [ ] **Search** — find a specific model by name / repo
 
 Contributions toward any of these are very welcome — see below.
 
