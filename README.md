@@ -11,6 +11,19 @@
 
 Dragonfly client written in Rust. It can serve as both a peer and a seed peer.
 
+## Usage
+
+### Download a GGUF model from Hugging Face
+
+Use the `gguf://` scheme to download a `.gguf` model file. Only `.gguf` files are
+accepted. The file is P2P-distributed like any other Dragonfly download, internally
+resolving via the Hugging Face backend, so the `--hf-token`, `--hf-revision`, and
+`--hf-base-url` options apply.
+
+```shell
+dfget gguf://owner/repo/model.gguf -O ./model.gguf
+```
+
 ## Documentation
 
 You can find the full documentation on the [d7y.io](https://d7y.io).

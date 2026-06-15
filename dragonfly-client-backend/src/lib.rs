@@ -33,6 +33,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tracing::{error, info, warn};
 use url::Url;
 
+pub mod gguf;
 pub mod hdfs;
 pub mod http;
 pub mod hugging_face;
@@ -487,6 +488,12 @@ impl BackendFactory {
         );
         info!("load [hf] builtin backend");
 
+        self.backends.insert(
+            gguf::SCHEME.to_string(),
+            Box::new(gguf::Gguf::new(self.config.clone())?),
+        );
+        info!("load [gguf] builtin backend");
+
         Ok(())
     }
 
@@ -556,6 +563,7 @@ mod tests {
             "cos",
             "hdfs",
             "hf",
+            "gguf",
             "modelscope",
         ];
         for backend in expected_backends {
@@ -588,7 +596,7 @@ mod tests {
         let plugin_dir = dir.path().join("non_existent_plugin_dir");
 
         let factory = BackendFactory::new(Arc::new(Config::default()), Some(&plugin_dir)).unwrap();
-        assert_eq!(factory.backends.len(), 11);
+        assert_eq!(factory.backends.len(), 12);
     }
 
     #[test]

@@ -25,7 +25,7 @@ use dragonfly_client::grpc::{dfdaemon_download::DfdaemonDownloadClient, health::
 use dragonfly_client::resource::piece::MIN_PIECE_LENGTH;
 use dragonfly_client::tracing::init_command_tracing;
 use dragonfly_client_backend::{
-    hdfs, hugging_face, model_scope, object_storage, BackendFactory, DirEntry,
+    gguf, hdfs, hugging_face, model_scope, object_storage, BackendFactory, DirEntry,
 };
 use dragonfly_client_config::VersionValueParser;
 use dragonfly_client_config::{self, dfdaemon, dfget};
@@ -784,7 +784,7 @@ async fn download_dir(args: Args, download_client: DfdaemonDownloadClient) -> Re
         None
     };
 
-    let hugging_face = if url.scheme() == hugging_face::SCHEME {
+    let hugging_face = if url.scheme() == hugging_face::SCHEME || url.scheme() == gguf::SCHEME {
         Some(HuggingFace {
             revision: args.hf_revision.clone(),
             token: args.hf_token.clone(),
@@ -1031,7 +1031,7 @@ async fn download(
         None
     };
 
-    let hugging_face = if url.scheme() == hugging_face::SCHEME {
+    let hugging_face = if url.scheme() == hugging_face::SCHEME || url.scheme() == gguf::SCHEME {
         Some(HuggingFace {
             revision: args.hf_revision.clone(),
             token: args.hf_token.clone(),
