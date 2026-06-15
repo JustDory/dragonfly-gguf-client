@@ -33,8 +33,12 @@ of nodes downloading the same model doesn't hammer Hugging Face N times.
 - **GGUF header metadata** — parse architecture, name, quantization (`general.file_type`), and
   tensor/KV counts from a GGUF file, including via a **range request** that reads just the header
   without downloading the whole model.
-- **Integrity verification** — extract Hugging Face's LFS `sha256` (`X-Linked-Etag`) and verify a
-  downloaded file against it, reusing Dragonfly's shared digest utilities.
+- **Integrity verification** — after a `gguf://` download, `dfget` fetches the file's source
+  `sha256` from Hugging Face (the LFS `X-Linked-Etag`, read without following the storage
+  redirect) and verifies the downloaded file against it, deleting it on mismatch. Dragonfly already
+  guarantees per-piece P2P integrity; this adds an end-to-end source-corruption / wrong-file check.
+  It is best-effort: if no digest is advertised the check is skipped, and only a confirmed mismatch
+  fails the download.
 - **Deterministic, cache-friendly** — the same `gguf://` URL always maps to the same task, so peers
   share pieces instead of re-downloading.
 - **Reuses Hugging Face auth** — `--hf-token`, `--hf-revision`, and `--hf-base-url` all apply.
@@ -181,9 +185,9 @@ with this fork's client image substituted for the peers.
 ## 🗺️ Roadmap
 
 - [x] `gguf://` backend with `.gguf` validation and P2P distribution
-- [x] GGUF header metadata parsing
-- [x] Hugging Face LFS `sha256` integrity verification
-- [ ] Wire metadata + hash verification into the `dfdaemon` download path
+- [x] GGUF header metadata parsing (library)
+- [x] Hugging Face LFS `sha256` integrity verification — wired into the `dfget` download path
+- [ ] Surface parsed GGUF metadata (architecture / quantization) on the CLI
 - [ ] Recursive repo download (`gguf://owner/repo` → every `.gguf` in the repo)
 - [ ] Sharded / multi-part GGUF (`model-00001-of-0000N.gguf`)
 - [ ] Seed-peer **preheat** for popular GGUF models
