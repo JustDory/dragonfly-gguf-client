@@ -37,10 +37,10 @@ through Dragonfly's P2P distribution system.
 ### Build from source
 
 ```shell
-# Replace <your-username> with your GitHub fork.
-git clone https://github.com/<your-username>/client.git dragonfly-gguf-client
+# Clone the fork and check out the gguf backend branch.
+# (Private repo: authenticate first, e.g. `gh auth login`, or use `gh repo clone`.)
+git clone -b feature/gguf-backend https://github.com/JustDory/dragonfly-gguf-client.git
 cd dragonfly-gguf-client
-git checkout feature/gguf-backend
 
 # Install the Rust toolchain if you don't have it.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
