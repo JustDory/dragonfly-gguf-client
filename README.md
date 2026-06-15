@@ -1,26 +1,93 @@
-# Dragonfly Client
+<div align="center">
 
-[![GitHub release](https://img.shields.io/github/release/dragonflyoss/client.svg)](https://github.com/dragonflyoss/client/releases)
-[![CI](https://github.com/dragonflyoss/client/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dragonflyoss/client/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/dragonflyoss/client/branch/main/graph/badge.svg)](https://codecov.io/gh/dragonflyoss/dfdaemon)
-[![Open Source Helpers](https://www.codetriage.com/dragonflyoss/client/badges/users.svg)](https://www.codetriage.com/dragonflyoss/client)
-[![Discussions](https://img.shields.io/badge/discussions-on%20github-blue?style=flat-square)](https://github.com/dragonflyoss/dragonfly/discussions)
-[![Twitter](https://img.shields.io/twitter/url?style=social&url=https%3A%2F%2Ftwitter.com%2Fdragonfly_oss)](https://twitter.com/dragonfly_oss)
-[![LICENSE](https://img.shields.io/github/license/dragonflyoss/dragonfly.svg?style=flat-square)](https://github.com/dragonflyoss/dragonfly/blob/main/LICENSE)
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fdragonflyoss%2Fclient.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fdragonflyoss%2Fclient?ref=badge_shield)
+# 🐉 Dragonfly GGUF Client
 
-Dragonfly client written in Rust. It can serve as both a peer and a seed peer.
+**Native `gguf://` model distribution for [Dragonfly](https://d7y.io) — pull GGUF models from Hugging Face over a peer-to-peer network.**
 
-This fork adds a native `gguf://` backend for downloading GGUF models from Hugging Face
-through Dragonfly's P2P distribution system.
+![Rust](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust&logoColor=white)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue)
+![Built on Dragonfly](https://img.shields.io/badge/built%20on-Dragonfly-1f6feb)
+![Distribution](https://img.shields.io/badge/distribution-P2P-success)
+![Tests](https://img.shields.io/badge/backend%20tests-passing-brightgreen)
 
-## Installation
+</div>
+
+---
+
+A fork of [`dragonflyoss/client`](https://github.com/dragonflyoss/client) that adds a first-class
+`gguf://` backend. Instead of pre-resolving Hugging Face URLs into raw HTTPS links (losing
+revision pinning and repo structure), you point `dfget` straight at a model:
+
+```shell
+dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf -O ./model.gguf
+```
+
+The model is split into pieces and **distributed peer-to-peer** through Dragonfly. The first peer
+fetches from Hugging Face; everyone after that pulls pieces from peers and seed caches — so a fleet
+of nodes downloading the same model doesn't hammer Hugging Face N times.
+
+## ✨ Features
+
+- **`gguf://` URL scheme** — download GGUF models by repo path, with Dragonfly P2P acceleration.
+- **`.gguf`-only validation** — the backend rejects non-GGUF files with a clear error.
+- **GGUF header metadata** — parse architecture, name, quantization (`general.file_type`), and
+  tensor/KV counts from a GGUF file, including via a **range request** that reads just the header
+  without downloading the whole model.
+- **Integrity verification** — extract Hugging Face's LFS `sha256` (`X-Linked-Etag`) and verify a
+  downloaded file against it, reusing Dragonfly's shared digest utilities.
+- **Deterministic, cache-friendly** — the same `gguf://` URL always maps to the same task, so peers
+  share pieces instead of re-downloading.
+- **Reuses Hugging Face auth** — `--hf-token`, `--hf-revision`, and `--hf-base-url` all apply.
+
+## 🎬 Demo
+
+Real output from a local two-peer cluster (a `client` peer pulling from a `seed-client`):
+
+```console
+$ dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf -O /tmp/model.gguf
+
+INFO load [gguf] builtin backend
+INFO start to download piece ...-93 from parent "172.30.0.7-...-seed"
+INFO finished piece ...-93 from parent "...-seed" using protocol tcp
+INFO all pieces are downloaded with scheduler
+INFO download task succeeded
+
+$ ls -l /tmp/model.gguf
+-rw-r--r-- 397805248  /tmp/model.gguf          # ~379 MB
+$ head -c 4 /tmp/model.gguf | xxd
+00000000: 4747 5546                    GGUF      # valid GGUF magic
+```
+
+<!-- Tip: record an asciinema cast of the above and embed it here for an animated demo. -->
+
+## 🧭 How it works
+
+`gguf://` is a thin wrapper over Dragonfly's existing Hugging Face backend. The backend validates the
+`.gguf` extension and rewrites the scheme to `hf://`, then `dfdaemon` handles piece-based P2P
+distribution exactly as it does for any other source.
+
+```mermaid
+flowchart LR
+    U["dfget gguf://owner/repo/model.gguf"] --> D["dfdaemon<br/>(gguf backend)"]
+    D -- "validate .gguf<br/>rewrite gguf:// → hf://" --> SCH["Scheduler"]
+    SCH --> SEED["Seed peer"]
+    SCH --> PEER["Other peers"]
+    SEED -- "back-to-source" --> HF[("Hugging Face")]
+    SEED -- "pieces over TCP" --> D
+    PEER -- "pieces over TCP" --> D
+    D --> OUT["model.gguf"]
+```
+
+The actual backend lives in [`dragonfly-client-backend/src/gguf.rs`](dragonfly-client-backend/src/gguf.rs),
+registered alongside the other schemes (`hf`, `s3`, `http`, …) in the backend factory.
+
+## 🚀 Installation
 
 ### Prerequisites
 
 - A Linux environment (native Linux or WSL2). The workspace depends on Linux-only crates
   (unix sockets, `fuse`), so it does **not** build on native Windows.
-- [Rust](https://rustup.rs/) (stable toolchain).
+- [Rust](https://rustup.rs/) — the repo pins toolchain **1.88.0** via `rust-toolchain.toml`.
 - Build dependencies. On Debian/Ubuntu:
 
   ```shell
@@ -29,59 +96,52 @@ through Dragonfly's P2P distribution system.
       libssl-dev libclang-dev protobuf-compiler
   ```
 
-  > **No `sudo`?** You can install user-local equivalents without root: a prebuilt
-  > `protoc` into `~/.local/bin` (set `PROTOC`), the `libclang` Python wheel
-  > (`pip install --user libclang`, set `LIBCLANG_PATH`), and point bindgen at your
-  > GCC headers via `BINDGEN_EXTRA_CLANG_ARGS="-I/usr/lib/gcc/x86_64-linux-gnu/<ver>/include"`.
+  > **No `sudo`?** You can install user-local equivalents without root: a prebuilt `protoc` into
+  > `~/.local/bin` (set `PROTOC`), the `libclang` Python wheel (`pip install --user libclang`, set
+  > `LIBCLANG_PATH`), and point bindgen at your GCC headers via
+  > `BINDGEN_EXTRA_CLANG_ARGS="-I/usr/lib/gcc/x86_64-linux-gnu/<ver>/include"`.
 
 ### Build from source
 
 ```shell
-# Clone the fork and check out the gguf backend branch.
-# (Private repo: authenticate first, e.g. `gh auth login`, or use `gh repo clone`.)
-git clone -b feature/gguf-backend https://github.com/JustDory/dragonfly-gguf-client.git
+# Private repo: authenticate first (e.g. `gh auth login`).
+git clone https://github.com/JustDory/dragonfly-gguf-client.git
 cd dragonfly-gguf-client
 
 # Install the Rust toolchain if you don't have it.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 
-# Build the client binaries.
+# Build the client binaries (produced in target/release/).
 cargo build --release --bin dfget --bin dfdaemon
-
-# Binaries are produced in target/release/ .
 ./target/release/dfget --help
 ```
 
-To run the backend unit tests:
+Run the backend unit tests:
 
 ```shell
 cargo test -p dragonfly-client-backend gguf
 ```
 
-## Usage
-
-### Download a GGUF model from Hugging Face
-
-Use the `gguf://` scheme to download a `.gguf` model file. Only `.gguf` files are
-accepted. The file is P2P-distributed like any other Dragonfly download, internally
-resolving via the Hugging Face backend, so the `--hf-token`, `--hf-revision`, and
-`--hf-base-url` options apply.
+## 📦 Usage
 
 ```shell
 dfget gguf://owner/repo/model.gguf -O ./model.gguf
 ```
 
-`dfget` forwards the request to a running `dfdaemon`, which downloads the model and
-distributes it over the P2P network. A standalone `dfget` therefore needs a `dfdaemon`
-(plus a Dragonfly scheduler and manager) to talk to — see below.
+Only `.gguf` files are accepted. `dfget` forwards the request to a running `dfdaemon`, which
+downloads the model and distributes it over the P2P network — so you need a `dfdaemon` (plus a
+Dragonfly scheduler and manager) to talk to. See [Testing peer-to-peer locally](#-testing-peer-to-peer-locally).
 
-## Testing peer-to-peer locally
+Hugging Face options apply: `--hf-token` (private repos), `--hf-revision` (pin a revision),
+`--hf-base-url` (mirror).
 
-A full P2P run needs a Dragonfly **manager**, **scheduler**, and at least one **peer**.
-The easiest way to stand these up is the official compose stack in the
-[dragonflyoss/dragonfly](https://github.com/dragonflyoss/dragonfly/tree/main/deploy/docker-compose)
-repo, with this fork's client image substituted for the peers.
+## 🌐 Testing peer-to-peer locally
+
+A full P2P run needs a Dragonfly **manager**, **scheduler**, and at least one **peer**. The easiest
+way is the official compose stack in
+[dragonflyoss/dragonfly](https://github.com/dragonflyoss/dragonfly/tree/main/deploy/docker-compose),
+with this fork's client image substituted for the peers.
 
 1. **Build this fork's client image:**
 
@@ -94,17 +154,16 @@ repo, with this fork's client image substituted for the peers.
    ```shell
    git clone https://github.com/dragonflyoss/dragonfly.git
    cd dragonfly/deploy/docker-compose
-   # In docker-compose.yaml, set the image of the `client` and `seed-client`
-   # services to: dragonfly-gguf-client:latest
+   # Set the image of the `client` and `seed-client` services to dragonfly-gguf-client:latest
    ```
 
-3. **Two gotchas to be aware of** (learned the hard way):
-   - The manager/scheduler/dfdaemon validate `advertiseIP` and `host.ip` as **real IP
-     addresses** — service-name hostnames are rejected. Assign each container a static IP
-     on a custom bridge network (e.g. `172.30.0.0/24`) and use those IPs for the advertise
-     fields. Connection strings (mysql/redis/manager `addr`) may use service names.
-   - The peers come up `Restarting` until the manager and scheduler are healthy; this is
-     expected and self-heals once the control plane is ready.
+3. **Two gotchas** (learned the hard way):
+   - The manager/scheduler/dfdaemon validate `advertiseIP` and `host.ip` as **real IP addresses** —
+     service-name hostnames are rejected. Assign each container a static IP on a custom bridge network
+     (e.g. `172.30.0.0/24`) and use those IPs for the advertise fields. Connection strings
+     (mysql/redis/manager `addr`) may use service names.
+   - Peers come up `Restarting` until the manager and scheduler are healthy; this is expected and
+     self-heals once the control plane is ready.
 
 4. **Bring it up and download:**
 
@@ -115,28 +174,37 @@ repo, with this fork's client image substituted for the peers.
      -O /tmp/model.gguf
    ```
 
-   The daemon log line `load [gguf] builtin backend` confirms the backend is registered,
-   and `finished piece ... from parent ...-seed using protocol tcp` confirms pieces were
-   served peer-to-peer.
+   The log line `load [gguf] builtin backend` confirms the backend is registered, and
+   `finished piece ... from parent ...-seed using protocol tcp` confirms pieces were served
+   peer-to-peer.
 
-## Documentation
+## 🗺️ Roadmap
 
-You can find the full documentation on the [d7y.io](https://d7y.io).
+- [x] `gguf://` backend with `.gguf` validation and P2P distribution
+- [x] GGUF header metadata parsing
+- [x] Hugging Face LFS `sha256` integrity verification
+- [ ] Wire metadata + hash verification into the `dfdaemon` download path
+- [ ] Recursive repo download (`gguf://owner/repo` → every `.gguf` in the repo)
+- [ ] Sharded / multi-part GGUF (`model-00001-of-0000N.gguf`)
+- [ ] Seed-peer **preheat** for popular GGUF models
+- [ ] `dfctl` support for the `gguf` scheme
 
-## Community
+Contributions toward any of these are very welcome — see below.
 
-Join the conversation and help the community grow. Here are the ways to get involved:
+## 🙌 Contributing
 
-- **Slack Channel**: [#dragonfly](https://cloud-native.slack.com/messages/dragonfly/) on [CNCF Slack](https://slack.cncf.io/)
-- **Github Discussions**: [Dragonfly Discussion Forum](https://github.com/dragonflyoss/dragonfly/discussions)
-- **Developer Group**: <dragonfly-developers@googlegroups.com>
-- **Mailing Lists**:
-  - **Developers**: <dragonfly-developers@googlegroups.com>
-  - **Maintainers**: <dragonfly-maintainers@googlegroups.com>
+Issues and pull requests are welcome. Please run `cargo test` and
+`cargo clippy --all-targets -- -D warnings` before submitting. See
+[CONTRIBUTING](./CONTRIBUTING.md) for the broader Dragonfly contribution guide.
+
+## 📄 License & acknowledgements
+
+Licensed under the [Apache License 2.0](./LICENSE). Built on top of the excellent
+[Dragonfly](https://github.com/dragonflyoss/dragonfly) project by the Dragonfly Authors and the
+CNCF community.
+
+## 💬 Community (upstream Dragonfly)
+
+- **Slack**: [#dragonfly](https://cloud-native.slack.com/messages/dragonfly/) on [CNCF Slack](https://slack.cncf.io/)
+- **GitHub Discussions**: [Dragonfly Discussion Forum](https://github.com/dragonflyoss/dragonfly/discussions)
 - **Twitter**: [@dragonfly_oss](https://twitter.com/dragonfly_oss)
-- **DingTalk Group**: `22880028764`
-
-## Contributing
-
-You should check out our
-[CONTRIBUTING](./CONTRIBUTING.md) and develop the project together.
