@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Built on Dragonfly](https://img.shields.io/badge/built%20on-Dragonfly-1f6feb)
 ![Distribution](https://img.shields.io/badge/distribution-P2P-success)
-![Tests](https://img.shields.io/badge/backend%20tests-passing-brightgreen)
+<!-- ![Tests](https://img.shields.io/badge/backend%20tests-passing-brightgreen) -->
 
 </div>
 
