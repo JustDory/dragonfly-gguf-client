@@ -113,7 +113,6 @@ registered alongside the other schemes (`hf`, `s3`, `http`, …) in the backend 
 ### Build from source
 
 ```shell
-# Private repo: authenticate first (e.g. `gh auth login`).
 git clone https://github.com/JustDory/dragonfly-gguf-client.git
 cd dragonfly-gguf-client
 
