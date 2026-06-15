@@ -192,6 +192,9 @@ with this fork's client image substituted for the peers.
 - [ ] Sharded / multi-part GGUF (`model-00001-of-0000N.gguf`)
 - [ ] Seed-peer **preheat** for popular GGUF models
 - [ ] `dfctl` support for the `gguf` scheme
+- [ ] **Model discovery** — browse available models in a paged list
+- [ ] **Sorting** — order the model list by *trending* and *most seeds* (P2P availability)
+- [ ] **Search** — find a specific model by name / repo
 
 Contributions toward any of these are very welcome — see below.
 
