@@ -1,0 +1,22 @@
+[package]
+name = "dragonfly-tracker"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+description = "Peer discovery tracker for Dragonfly GGUF P2P distribution"
+license.workspace = true
+
+[[bin]]
+name = "dragonfly-tracker"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+dashmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+warp.workspace = true

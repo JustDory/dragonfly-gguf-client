@@ -1,0 +1,24 @@
+[package]
+name = "dragonfly-client-p2p"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+description = "Iroh-based P2P layer for Dragonfly GGUF distribution"
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+openssl.workspace = true
+hex.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+dashmap.workspace = true
+iroh.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+tempfile = "3"
