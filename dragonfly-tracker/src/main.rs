@@ -1,7 +1,5 @@
-mod routes;
-mod store;
-
 use clap::Parser;
+use dragonfly_tracker::{routes, store};
 use std::net::SocketAddr;
 
 #[derive(Debug, Parser)]

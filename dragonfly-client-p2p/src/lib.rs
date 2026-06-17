@@ -3,11 +3,12 @@ mod node;
 mod seeder;
 mod tracker;
 
+pub use seeder::{default_registry_dir, register_seed, run_seed_service, SeedManifest};
 pub use tracker::TrackerClient;
 
 use anyhow::Result;
 use sha2::Digest;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 pub const DEFAULT_TRACKER_URL: &str = "https://tracker.dragonfly-gguf.dev";
@@ -52,20 +53,6 @@ pub async fn try_p2p_download(
     result
 }
 
-pub async fn seed_in_background(
-    tracker_url: String,
-    content_key: String,
-    file_path: PathBuf,
-    seed_duration: Duration,
-) {
-    tokio::spawn(async move {
-        if let Err(e) =
-            seeder::run_seeder(tracker_url, content_key, file_path, seed_duration).await
-        {
-            tracing::warn!("P2P seeder stopped: {e}");
-        }
-    });
-}
 
 #[cfg(test)]
 mod tests {

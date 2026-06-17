@@ -432,6 +432,21 @@ async fn main() -> Result<(), anyhow::Error> {
         shutdown_complete_tx.clone(),
     );
 
+    // Initialize the gguf P2P seed service registry (opt-in via env). When
+    // enabled, dfdaemon hosts a persistent Iroh endpoint that seeds every file
+    // dfget registers in the shared registry directory.
+    let gguf_seed_registry: Option<PathBuf> = if std::env::var_os("DRAGONFLY_GGUF_SEED")
+        .is_some_and(|v| v != "0" && !v.is_empty())
+    {
+        let dir = std::env::var_os("DRAGONFLY_GGUF_SEED_REGISTRY")
+            .map(PathBuf::from)
+            .unwrap_or_else(dragonfly_client_p2p::default_registry_dir);
+        info!("gguf P2P seeding enabled, registry {:?}", dir);
+        Some(dir)
+    } else {
+        None
+    };
+
     // Log dfdaemon started pid and whether it is running in container.
     info!(
         "dfdaemon started at pid {}, containerized: {}",
@@ -509,6 +524,32 @@ async fn main() -> Result<(), anyhow::Error> {
             })
         } => {
             info!("proxy server exited");
+        },
+
+        _ = {
+            let mut sd = shutdown.clone();
+            let tx = shutdown_complete_tx.clone();
+            let registry = gguf_seed_registry.clone();
+            tokio::spawn(async move {
+                // Held for the lifetime of the task so graceful shutdown waits for us.
+                let _shutdown_complete = tx;
+                match registry {
+                    Some(dir) => {
+                        if let Err(err) = dragonfly_client_p2p::run_seed_service(
+                            dir,
+                            async move { sd.recv().await },
+                        )
+                        .await
+                        {
+                            error!("gguf seed service failed: {}", err);
+                        }
+                    }
+                    // Seeding disabled: just park until shutdown.
+                    None => sd.recv().await,
+                }
+            })
+        } => {
+            info!("gguf seed service exited");
         },
 
         _ = shutdown::shutdown_signal() => {},

@@ -1149,13 +1149,23 @@ async fn download(
                     }
                 }
                 if seed_time > 0 {
-                    p2p::seed_in_background(
-                        tracker_url,
-                        key,
-                        output_clone,
+                    // Hand the file off to the long-lived seed service (dfdaemon)
+                    // by writing a manifest; dfget itself exits immediately, so a
+                    // spawned task here would be killed before it could seed.
+                    let registry_dir = p2p::default_registry_dir();
+                    match p2p::register_seed(
+                        &registry_dir,
+                        &tracker_url,
+                        &key,
+                        &output_clone,
                         Duration::from_secs(seed_time),
-                    )
-                    .await;
+                    ) {
+                        Ok(()) => info!(
+                            "registered {:?} for P2P seeding ({}s); served by dfdaemon",
+                            output_clone, seed_time
+                        ),
+                        Err(e) => warn!("could not register seed (will not seed): {e}"),
+                    }
                 }
                 progress_bar.finish_with_message("done (P2P)");
                 return Ok(());
