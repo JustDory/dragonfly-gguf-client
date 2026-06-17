@@ -16,6 +16,7 @@
 
 use bytesize::ByteSize;
 use clap::Parser;
+use dragonfly_client_p2p as p2p;
 use dragonfly_api::common::v2::{Download, Hdfs, HuggingFace, ModelScope, ObjectStorage, TaskType};
 use dragonfly_api::dfdaemon::v2::{
     download_task_response, DownloadTaskRequest, ListTaskEntriesRequest,
@@ -423,6 +424,45 @@ struct Args {
         value_parser = VersionValueParser
     )]
     version: bool,
+
+    #[arg(
+        long,
+        default_value = "https://tracker.dragonfly-gguf.dev",
+        env = "DRAGONFLY_P2P_TRACKER",
+        help = "Tracker URL for P2P peer discovery (community instance by default)"
+    )]
+    p2p_tracker: String,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "DRAGONFLY_NO_P2P",
+        help = "Disable Iroh P2P and use Dragonfly/HF directly"
+    )]
+    no_p2p: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "DRAGONFLY_PREFER_DRAGONFLY",
+        help = "Prefer Dragonfly scheduler over P2P for gguf:// downloads"
+    )]
+    prefer_dragonfly: bool,
+
+    #[arg(
+        long,
+        default_value_t = 3600,
+        env = "DRAGONFLY_SEED_TIME",
+        help = "Seconds to seed after a successful download (0 to disable seeding)"
+    )]
+    seed_time: u64,
+
+    #[arg(
+        long,
+        env = "DRAGONFLY_IROH_KEYPAIR",
+        help = "Path to persistent Iroh keypair file (default: ~/.config/dragonfly/iroh.key)"
+    )]
+    iroh_keypair: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -1063,6 +1103,51 @@ async fn download(
         },
         timeout: args.timeout,
     });
+
+    // Attempt Iroh P2P download for gguf:// URLs before the Dragonfly/HF path.
+    if url.scheme() == gguf::SCHEME && !args.no_p2p && !args.prefer_dragonfly {
+        let tracker_url = args.p2p_tracker.clone();
+        let key = p2p::content_key(args.url.as_str(), &args.hf_revision);
+        let output_clone = args.output.clone();
+        let seed_time = args.seed_time;
+        let keypair_path = args.iroh_keypair.clone().or_else(|| {
+            std::env::var_os("HOME")
+                .map(|h| PathBuf::from(h).join(".config").join("dragonfly").join("iroh.key"))
+        });
+
+        match p2p::try_p2p_download(
+            &tracker_url,
+            &key,
+            &args.output,
+            keypair_path.as_deref(),
+            args.timeout,
+        )
+        .await
+        {
+            Ok(()) => {
+                if let Some(ref gv) = gguf_verification {
+                    if let Err(e) = verify_downloaded_gguf(gv).await {
+                        error!("P2P download integrity check failed: {e}");
+                        return Err(e);
+                    }
+                }
+                if seed_time > 0 {
+                    p2p::seed_in_background(
+                        tracker_url,
+                        key,
+                        output_clone,
+                        Duration::from_secs(seed_time),
+                    )
+                    .await;
+                }
+                progress_bar.finish_with_message("done (P2P)");
+                return Ok(());
+            }
+            Err(e) => {
+                warn!("P2P download unavailable ({e}), falling back to Dragonfly");
+            }
+        }
+    }
 
     // If the `filtered_query_params` is not provided, then use the default value.
     let filtered_query_params = args

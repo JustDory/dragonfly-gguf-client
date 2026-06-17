@@ -11,6 +11,8 @@ members = [
   "dragonfly-client-storage",
   "dragonfly-client-util",
   "dragonfly-client-util/examples/request",
+  "dragonfly-client-p2p",
+  "dragonfly-tracker",
 ]
 
 [workspace.package]
@@ -43,6 +45,7 @@ dragonfly-client-init = { path = "dragonfly-client-init", version = "1.3.12" }
 dragonfly-client-metric = { path = "dragonfly-client-metric", version = "1.3.12" }
 dragonfly-client-storage = { path = "dragonfly-client-storage", version = "1.3.12" }
 dragonfly-client-util = { path = "dragonfly-client-util", version = "1.3.12" }
+dragonfly-client-p2p = { path = "dragonfly-client-p2p", version = "1.3.12" }
 fastrand = "2.4.1"
 fs2 = "0.4.3"
 futures = "0.3.32"
@@ -139,6 +142,8 @@ uuid = { version = "1.20", features = ["v4"] }
 validator = { version = "0.16", features = ["derive"] }
 vortex-protocol = "0.1.5"
 warp = "0.3.5"
+iroh = "1"
+iroh-blobs = "0.103"
 
 # TODO(Gaius): Remove the git dependency after the next release of mocktail, refer to https://github.com/IBM/mocktail/issues/65.
 mocktail = { git = "https://github.com/IBM/mocktail", rev = "860e75e171a8eb818083813dbeed4401d1a40b3b", version = "0.3.0" }

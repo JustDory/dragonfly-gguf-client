@@ -1,0 +1,17 @@
+services:
+  tracker:
+    build:
+      context: ../../
+      dockerfile: deploy/tracker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      TRACKER_BIND: "0.0.0.0:8080"
+      TRACKER_TTL: "1800"
+      TRACKER_RATE_LIMIT: "10"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/peers?content_key=0000000000000000000000000000000000000000000000000000000000000000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
