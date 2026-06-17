@@ -55,6 +55,8 @@ use tracing::{debug, error, info, warn, Instrument, Level};
 use url::Url;
 use uuid::Uuid;
 
+mod update_notice;
+
 const LONG_ABOUT: &str = r#"
 A download command line based on P2P technology in Dragonfly that can download resources of different protocols.
 
@@ -463,6 +465,14 @@ struct Args {
         help = "Path to persistent Iroh keypair file (default: ~/.config/dragonfly/iroh.key)"
     )]
     iroh_keypair: Option<PathBuf>,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "DRAGONFLY_NO_UPDATE_NOTICE",
+        help = "Do not check for project announcements or new versions after a download"
+    )]
+    no_update_notice: bool,
 }
 
 #[tokio::main]
@@ -553,6 +563,9 @@ async fn main() -> anyhow::Result<()> {
                 std::process::exit(1);
             }
         };
+
+    // Capture the update-notice preference before `args` is moved into run().
+    let no_update_notice = args.no_update_notice;
 
     // Run dfget command.
     if let Err(err) = run(args, dfdaemon_download_client).await {
@@ -756,6 +769,10 @@ async fn main() -> anyhow::Result<()> {
 
         std::process::exit(1);
     }
+
+    // Best-effort: surface any project announcement or new-version notice. Never
+    // blocks or fails the command.
+    update_notice::print_if_any(no_update_notice).await;
 
     Ok(())
 }
