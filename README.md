@@ -180,8 +180,14 @@ dfget gguf://owner/repo/model.gguf -O ./model.gguf \
   --p2p-tracker http://your-tracker:8080
 ```
 
-No cluster needed. `dfget` checks the tracker for peers, downloads from the first available one,
-verifies the sha256, and then seeds to others automatically for `--seed-time` seconds (default 1h).
+For discovery and download, no cluster is needed: `dfget` checks the tracker for peers, downloads
+from the first available one, and verifies the sha256.
+
+**Seeding** (sharing what you downloaded back to the swarm) is handled by `dfdaemon`, not `dfget` —
+`dfget` is a short-lived command and can't keep an Iroh endpoint alive after it exits. Instead it
+writes a small *seed manifest* to a shared registry directory, and a `dfdaemon` running with seeding
+enabled hosts one persistent Iroh endpoint that serves every registered file until its manifest
+expires. See [Enabling seeding](#enabling-seeding-dfdaemon).
 
 **All `--p2p-*` flags:**
 
@@ -190,11 +196,26 @@ verifies the sha256, and then seeds to others automatically for `--seed-time` se
 | `--p2p-tracker <url>` | *(community tracker)* | `DRAGONFLY_P2P_TRACKER` | Tracker URL for peer discovery |
 | `--no-p2p` | false | `DRAGONFLY_NO_P2P` | Skip Iroh P2P entirely |
 | `--prefer-dragonfly` | false | `DRAGONFLY_PREFER_DRAGONFLY` | Skip Iroh, go straight to Dragonfly |
-| `--seed-time <secs>` | 3600 | `DRAGONFLY_SEED_TIME` | How long to seed after a download |
+| `--seed-time <secs>` | 3600 | `DRAGONFLY_SEED_TIME` | How long the registered seed stays live |
 | `--iroh-keypair <path>` | `~/.config/dragonfly/iroh.key` | `DRAGONFLY_IROH_KEYPAIR` | Persistent Iroh node identity |
 
 Hugging Face options also apply: `--hf-token` (private repos), `--hf-revision` (pin a revision),
 `--hf-base-url` (mirror).
+
+### Enabling seeding (dfdaemon)
+
+Run `dfdaemon` with `DRAGONFLY_GGUF_SEED=1`. It watches the seed registry
+(`$XDG_DATA_HOME/dragonfly/gguf-seeds`, override with `DRAGONFLY_GGUF_SEED_REGISTRY`) and seeds every
+file `dfget` registers there:
+
+```shell
+DRAGONFLY_GGUF_SEED=1 dfdaemon --config /path/to/config.yaml
+```
+
+The registry is just JSON files on disk, so seeding **survives a daemon restart** — on boot the
+daemon resumes serving every manifest that hasn't expired. When a manifest expires (or its source
+file is deleted), the daemon de-announces it from the tracker and removes the manifest, so peers are
+never handed a node that's about to disappear.
 
 ### Fallback order
 
@@ -248,19 +269,26 @@ DELETE /leave
 # 1. Start the tracker
 ./target/debug/dragonfly-tracker --bind 127.0.0.1:8080 &
 
-# 2. Download (first time — no peers yet, falls back to Dragonfly/HF)
+# 2. Start a daemon with seeding enabled (hosts the persistent Iroh endpoint)
+DRAGONFLY_GGUF_SEED=1 ./target/debug/dfdaemon --config /path/to/config.yaml &
+
+# 3. Download (first time — no peers yet, falls back to Dragonfly/HF).
+#    On success dfget writes a seed manifest; the daemon then announces + serves it.
 dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf \
   -O /tmp/model.gguf --p2p-tracker http://127.0.0.1:8080
-# After the download finishes, dfget announces itself to the tracker and seeds for 1 hour.
 
-# 3. Second download from a different output path — should hit the P2P peer
+# 4. Second download from a different output path — should hit the P2P peer
 dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf \
   -O /tmp/model2.gguf --p2p-tracker http://127.0.0.1:8080
 # Watch for: "found N P2P provider(s)" and "P2P download complete" in the logs.
 
-# 4. Verify they match
+# 5. Verify they match
 sha256sum /tmp/model.gguf /tmp/model2.gguf
 ```
+
+> The automated equivalent of this flow runs in CI as
+> `cargo test -p dragonfly-client-p2p --test registry_e2e`: it starts an in-process tracker, runs
+> the seed service against a registered manifest, and downloads the file back over Iroh.
 
 For a cross-machine test, deploy the tracker to a public server and have two machines (even behind
 different home NATs) both point at it. Iroh's relay will bridge the initial connection, and

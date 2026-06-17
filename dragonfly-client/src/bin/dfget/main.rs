@@ -55,6 +55,8 @@ use tracing::{debug, error, info, warn, Instrument, Level};
 use url::Url;
 use uuid::Uuid;
 
+mod update_notice;
+
 const LONG_ABOUT: &str = r#"
 A download command line based on P2P technology in Dragonfly that can download resources of different protocols.
 
@@ -463,6 +465,14 @@ struct Args {
         help = "Path to persistent Iroh keypair file (default: ~/.config/dragonfly/iroh.key)"
     )]
     iroh_keypair: Option<PathBuf>,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "DRAGONFLY_NO_UPDATE_NOTICE",
+        help = "Do not check for project announcements or new versions after a download"
+    )]
+    no_update_notice: bool,
 }
 
 #[tokio::main]
@@ -553,6 +563,9 @@ async fn main() -> anyhow::Result<()> {
                 std::process::exit(1);
             }
         };
+
+    // Capture the update-notice preference before `args` is moved into run().
+    let no_update_notice = args.no_update_notice;
 
     // Run dfget command.
     if let Err(err) = run(args, dfdaemon_download_client).await {
@@ -756,6 +769,10 @@ async fn main() -> anyhow::Result<()> {
 
         std::process::exit(1);
     }
+
+    // Best-effort: surface any project announcement or new-version notice. Never
+    // blocks or fails the command.
+    update_notice::print_if_any(no_update_notice).await;
 
     Ok(())
 }
@@ -1132,13 +1149,23 @@ async fn download(
                     }
                 }
                 if seed_time > 0 {
-                    p2p::seed_in_background(
-                        tracker_url,
-                        key,
-                        output_clone,
+                    // Hand the file off to the long-lived seed service (dfdaemon)
+                    // by writing a manifest; dfget itself exits immediately, so a
+                    // spawned task here would be killed before it could seed.
+                    let registry_dir = p2p::default_registry_dir();
+                    match p2p::register_seed(
+                        &registry_dir,
+                        &tracker_url,
+                        &key,
+                        &output_clone,
                         Duration::from_secs(seed_time),
-                    )
-                    .await;
+                    ) {
+                        Ok(()) => info!(
+                            "registered {:?} for P2P seeding ({}s); served by dfdaemon",
+                            output_clone, seed_time
+                        ),
+                        Err(e) => warn!("could not register seed (will not seed): {e}"),
+                    }
                 }
                 progress_bar.finish_with_message("done (P2P)");
                 return Ok(());
