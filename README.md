@@ -29,7 +29,7 @@ of nodes downloading the same model doesn't hammer Hugging Face N times.
 ## ✨ Features
 
 - **`gguf://` URL scheme** — download GGUF models by repo path, with Dragonfly P2P acceleration.
-- **`.gguf`-only validation** — the backend rejects non-GGUF files with a clear error.
+- **`.gguf`-only validation** — the backend rejects non-GGUF files.
 - **GGUF header metadata** — parse architecture, name, quantization (`general.file_type`), and
   tensor/KV counts from a GGUF file, including via a **range request** that reads just the header
   without downloading the whole model.
