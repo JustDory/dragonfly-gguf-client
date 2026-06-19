@@ -217,7 +217,7 @@ fn is_newer(remote: &str, current: &str) -> bool {
 fn cache_path() -> PathBuf {
     let dir = std::env::var_os("HOME")
         .map(|home| PathBuf::from(home).join(".cache").join("dragonfly"))
-        .unwrap_or_else(std::env::temp_dir);
+        .unwrap_or_else(|| std::env::temp_dir().join("dragonfly"));
     dir.join("gguf-update-notice.json")
 }
 

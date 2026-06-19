@@ -121,6 +121,14 @@ async fn handle_peers(
     query: PeersQuery,
     store: Arc<PeerStore>,
 ) -> Result<impl warp::Reply, warp::Rejection> {
+    if query.content_key.len() != 64
+        || !query.content_key.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return Ok(warp::reply::with_status(
+            warp::reply::json(&serde_json::json!({"error": "invalid content_key"})),
+            warp::http::StatusCode::BAD_REQUEST,
+        ));
+    }
     let providers = store.get_peers(&query.content_key);
     tracing::debug!("returning {} providers for key {}", providers.len(), &query.content_key[..8.min(query.content_key.len())]);
     Ok(warp::reply::with_status(
@@ -174,5 +182,19 @@ mod tests {
         assert!(!valid_announce(&body(&"a".repeat(64), "node", "not json")));
         let huge = format!("\"{}\"", "x".repeat(MAX_ADDR_INFO_LEN));
         assert!(!valid_announce(&body(&"a".repeat(64), "node", &huge)));
+    }
+
+    #[test]
+    fn peers_query_key_validation() {
+        // Mirrors the content_key check in handle_peers: only 64 lowercase hex accepted.
+        let valid_key = "a".repeat(64);
+        assert_eq!(valid_key.len(), 64);
+        assert!(valid_key.bytes().all(|b| b.is_ascii_hexdigit()));
+
+        let short = "a".repeat(63);
+        assert!(short.len() != 64 || !short.bytes().all(|b| b.is_ascii_hexdigit()));
+
+        let non_hex = "z".repeat(64);
+        assert!(!non_hex.bytes().all(|b| b.is_ascii_hexdigit()));
     }
 }

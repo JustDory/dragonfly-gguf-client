@@ -51,7 +51,14 @@ async fn accept_inner(conn: Connection, files: Arc<DashMap<String, PathBuf>>) ->
 
             send.write_all(&[1u8]).await?;
             send.write_all(&file_len.to_le_bytes()).await?;
-            tokio::io::copy(&mut file, &mut send).await?;
+            let copied = tokio::io::copy(&mut file, &mut send).await?;
+            if copied != file_len {
+                return Err(anyhow::anyhow!(
+                    "file changed during transfer: expected {} bytes, sent {}",
+                    file_len,
+                    copied
+                ));
+            }
             send.finish()?;
             tracing::debug!(
                 "served {} bytes for key {}",

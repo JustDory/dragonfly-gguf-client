@@ -30,8 +30,10 @@ pub fn content_key(gguf_url: &str, revision: &str, base_url: Option<&str>) -> St
         .strip_prefix("gguf://")
         .map(|rest| format!("hf://{rest}"))
         .unwrap_or_else(|| gguf_url.to_string());
-    let base = base_url.unwrap_or_default();
-    let input = format!("{base}|{hf_url}:{revision}");
+    let input = match base_url {
+        Some(b) if !b.is_empty() => format!("{hf_url}:{revision}:{b}"),
+        _ => format!("{hf_url}:{revision}"),
+    };
     hex::encode(sha2::Sha256::digest(input.as_bytes()))
 }
 
@@ -107,5 +109,17 @@ mod tests {
         let k3 = content_key("gguf://owner/repo/model.gguf", "main", None);
         let k4 = content_key("gguf://owner/repo/model.gguf", "main", Some(""));
         assert_eq!(k3, k4);
+    }
+
+    #[test]
+    fn test_content_key_no_spurious_pipe() {
+        // Regression: earlier impl used format!("{base}|{hf_url}:{revision}") which
+        // produced a leading "|" when base_url is None, giving a wrong hash.
+        // Verify the input string is "hf://...:main", not "|hf://...:main".
+        let k_no_base = content_key("hf://owner/repo/model.gguf", "main", None);
+        let k_pipe = hex::encode(sha2::Sha256::digest(b"|hf://owner/repo/model.gguf:main"));
+        assert_ne!(k_no_base, k_pipe, "content_key must not include a spurious leading pipe");
+        let expected = hex::encode(sha2::Sha256::digest(b"hf://owner/repo/model.gguf:main"));
+        assert_eq!(k_no_base, expected);
     }
 }
