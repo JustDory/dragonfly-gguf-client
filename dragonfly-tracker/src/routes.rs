@@ -28,6 +28,29 @@ struct PeersResponse {
     providers: Vec<crate::store::PeerEntry>,
 }
 
+/// Upper bound on a serialized Iroh `EndpointAddr` we are willing to store. Real
+/// records are well under 1 KiB; this keeps a misbehaving client from bloating
+/// the in-memory store with huge announcements.
+const MAX_ADDR_INFO_LEN: usize = 8 * 1024;
+
+/// Upper bound on an Iroh node id (a base32-encoded ed25519 key is ~52 chars).
+const MAX_NODE_ID_LEN: usize = 128;
+
+/// Validates an announce body before it is stored: the content key must be a
+/// 64-char hex sha256, the node id must be a sane non-empty string, and addr_info
+/// must be non-empty, bounded, and valid JSON (it is a serialized Iroh
+/// `EndpointAddr`). Rejecting malformed records here keeps the peer store small
+/// and the data we hand back to downloaders well-formed.
+fn valid_announce(body: &AnnounceBody) -> bool {
+    body.content_key.len() == 64
+        && body.content_key.bytes().all(|b| b.is_ascii_hexdigit())
+        && !body.node_id.is_empty()
+        && body.node_id.len() <= MAX_NODE_ID_LEN
+        && !body.addr_info.is_empty()
+        && body.addr_info.len() <= MAX_ADDR_INFO_LEN
+        && serde_json::from_str::<serde_json::Value>(&body.addr_info).is_ok()
+}
+
 fn with_store(
     store: Arc<PeerStore>,
 ) -> impl Filter<Extract = (Arc<PeerStore>,), Error = Infallible> + Clone {
@@ -78,7 +101,7 @@ async fn handle_announce(
         ));
     }
 
-    if body.content_key.len() != 64 || body.node_id.is_empty() {
+    if !valid_announce(&body) {
         return Ok(warp::reply::with_status(
             warp::reply::json(&serde_json::json!({"error": "invalid request"})),
             warp::http::StatusCode::BAD_REQUEST,
@@ -115,4 +138,41 @@ async fn handle_leave(
         warp::reply::json(&serde_json::json!({"ok": true})),
         warp::http::StatusCode::OK,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn body(key: &str, node: &str, addr: &str) -> AnnounceBody {
+        AnnounceBody {
+            content_key: key.to_string(),
+            node_id: node.to_string(),
+            addr_info: addr.to_string(),
+        }
+    }
+
+    #[test]
+    fn accepts_well_formed_announce() {
+        assert!(valid_announce(&body(&"a".repeat(64), "node-1", "{}")));
+    }
+
+    #[test]
+    fn rejects_malformed_announce() {
+        // Wrong content_key length or non-hex characters.
+        assert!(!valid_announce(&body(&"a".repeat(63), "node", "{}")));
+        assert!(!valid_announce(&body(&"z".repeat(64), "node", "{}")));
+        // Empty / oversized node id.
+        assert!(!valid_announce(&body(&"a".repeat(64), "", "{}")));
+        assert!(!valid_announce(&body(
+            &"a".repeat(64),
+            &"n".repeat(MAX_NODE_ID_LEN + 1),
+            "{}"
+        )));
+        // Empty, non-JSON, or oversized addr_info.
+        assert!(!valid_announce(&body(&"a".repeat(64), "node", "")));
+        assert!(!valid_announce(&body(&"a".repeat(64), "node", "not json")));
+        let huge = format!("\"{}\"", "x".repeat(MAX_ADDR_INFO_LEN));
+        assert!(!valid_announce(&body(&"a".repeat(64), "node", &huge)));
+    }
 }

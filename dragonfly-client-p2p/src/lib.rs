@@ -15,13 +15,23 @@ pub const DEFAULT_TRACKER_URL: &str = "https://tracker.dragonfly-gguf.dev";
 
 pub(crate) const ALPN: &[u8] = b"/dragonfly-gguf/1";
 
-pub fn content_key(gguf_url: &str, revision: &str) -> String {
+/// Derive the stable P2P content key for a `gguf://` (or `hf://`) URL.
+///
+/// The key binds the source host, the canonical owner/repo/path and the
+/// revision, so two peers only ever exchange content that is byte-for-byte the
+/// same source object:
+///   * `base_url` is included so the same path served by two different
+///     Hugging Face-compatible mirrors never collides on one key.
+///   * the path is **not** lowercased — Hugging Face files are git blobs and are
+///     therefore case-sensitive, so `Model.gguf` and `model.gguf` must map to
+///     distinct keys (otherwise a peer could serve the wrong file).
+pub fn content_key(gguf_url: &str, revision: &str, base_url: Option<&str>) -> String {
     let hf_url = gguf_url
         .strip_prefix("gguf://")
         .map(|rest| format!("hf://{rest}"))
         .unwrap_or_else(|| gguf_url.to_string());
-    let canonical = hf_url.to_lowercase();
-    let input = format!("{canonical}:{revision}");
+    let base = base_url.unwrap_or_default();
+    let input = format!("{base}|{hf_url}:{revision}");
     hex::encode(sha2::Sha256::digest(input.as_bytes()))
 }
 
@@ -60,23 +70,42 @@ mod tests {
 
     #[test]
     fn test_content_key_stability() {
-        let k1 = content_key("gguf://owner/repo/model.gguf", "main");
-        let k2 = content_key("gguf://owner/repo/model.gguf", "main");
+        let k1 = content_key("gguf://owner/repo/model.gguf", "main", None);
+        let k2 = content_key("gguf://owner/repo/model.gguf", "main", None);
         assert_eq!(k1, k2);
         assert_eq!(k1.len(), 64);
     }
 
     #[test]
-    fn test_content_key_normalization() {
-        let k1 = content_key("gguf://Owner/Repo/Model.gguf", "main");
-        let k2 = content_key("gguf://owner/repo/model.gguf", "main");
-        assert_eq!(k1, k2, "content_key must be case-insensitive");
+    fn test_content_key_is_case_sensitive() {
+        // Hugging Face files are case-sensitive git blobs, so distinct casing must
+        // produce distinct keys — a peer must never serve the wrong file.
+        let k1 = content_key("gguf://Owner/Repo/Model.gguf", "main", None);
+        let k2 = content_key("gguf://owner/repo/model.gguf", "main", None);
+        assert_ne!(k1, k2);
     }
 
     #[test]
     fn test_content_key_revision_matters() {
-        let k1 = content_key("gguf://owner/repo/model.gguf", "main");
-        let k2 = content_key("gguf://owner/repo/model.gguf", "v1.0");
+        let k1 = content_key("gguf://owner/repo/model.gguf", "main", None);
+        let k2 = content_key("gguf://owner/repo/model.gguf", "v1.0", None);
         assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn test_content_key_base_url_matters() {
+        // The same path on two different mirrors must not collide.
+        let k1 = content_key("gguf://owner/repo/model.gguf", "main", Some("https://hf.co"));
+        let k2 = content_key(
+            "gguf://owner/repo/model.gguf",
+            "main",
+            Some("https://mirror.example"),
+        );
+        assert_ne!(k1, k2);
+
+        // None and "" are the same default.
+        let k3 = content_key("gguf://owner/repo/model.gguf", "main", None);
+        let k4 = content_key("gguf://owner/repo/model.gguf", "main", Some(""));
+        assert_eq!(k3, k4);
     }
 }

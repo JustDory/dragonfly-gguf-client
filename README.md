@@ -202,14 +202,21 @@ expires. See [Enabling seeding](#enabling-seeding-dfdaemon).
 Hugging Face options also apply: `--hf-token` (private repos), `--hf-revision` (pin a revision),
 `--hf-base-url` (mirror).
 
-### Enabling seeding (dfdaemon)
+### Seeding (dfdaemon)
 
-Run `dfdaemon` with `DRAGONFLY_GGUF_SEED=1`. It watches the seed registry
+Seeding is **on by default**. A running `dfdaemon` watches the seed registry
 (`$XDG_DATA_HOME/dragonfly/gguf-seeds`, override with `DRAGONFLY_GGUF_SEED_REGISTRY`) and seeds every
-file `dfget` registers there:
+file `dfget` registers there — so the network bootstraps itself with no extra flags:
 
 ```shell
-DRAGONFLY_GGUF_SEED=1 dfdaemon --config /path/to/config.yaml
+dfdaemon --config /path/to/config.yaml
+```
+
+To opt out (the daemon then never opens an Iroh endpoint or announces seeds):
+
+```shell
+dfdaemon --no-gguf-seed --config /path/to/config.yaml
+# or: DRAGONFLY_GGUF_SEED=0 dfdaemon --config /path/to/config.yaml
 ```
 
 The registry is just JSON files on disk, so seeding **survives a daemon restart** — on boot the
@@ -269,8 +276,8 @@ DELETE /leave
 # 1. Start the tracker
 ./target/debug/dragonfly-tracker --bind 127.0.0.1:8080 &
 
-# 2. Start a daemon with seeding enabled (hosts the persistent Iroh endpoint)
-DRAGONFLY_GGUF_SEED=1 ./target/debug/dfdaemon --config /path/to/config.yaml &
+# 2. Start a daemon (seeding is on by default — hosts the persistent Iroh endpoint)
+./target/debug/dfdaemon --config /path/to/config.yaml &
 
 # 3. Download (first time — no peers yet, falls back to Dragonfly/HF).
 #    On success dfget writes a seed manifest; the daemon then announces + serves it.

@@ -24,7 +24,7 @@ async fn registry_seed_service_serves_a_registered_file() {
     let content = b"GGUF registry end-to-end content";
     tokio::fs::write(&model, content).await.unwrap();
 
-    let key = p2p::content_key("gguf://owner/repo/model.gguf", "main");
+    let key = p2p::content_key("gguf://owner/repo/model.gguf", "main", None);
     p2p::register_seed(
         &registry,
         &tracker_url,

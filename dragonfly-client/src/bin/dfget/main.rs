@@ -1124,7 +1124,11 @@ async fn download(
     // Attempt Iroh P2P download for gguf:// URLs before the Dragonfly/HF path.
     if url.scheme() == gguf::SCHEME && !args.no_p2p && !args.prefer_dragonfly {
         let tracker_url = args.p2p_tracker.clone();
-        let key = p2p::content_key(args.url.as_str(), &args.hf_revision);
+        let key = p2p::content_key(
+            args.url.as_str(),
+            &args.hf_revision,
+            args.hf_base_url.as_deref(),
+        );
         let output_clone = args.output.clone();
         let seed_time = args.seed_time;
         let keypair_path = args.iroh_keypair.clone().or_else(|| {
@@ -1145,28 +1149,14 @@ async fn download(
                 if let Some(ref gv) = gguf_verification {
                     if let Err(e) = verify_downloaded_gguf(gv).await {
                         error!("P2P download integrity check failed: {e}");
+                        // Never leave a corrupt file on disk (mirror the fallback path).
+                        fs::remove_file(&gv.output).await.inspect_err(|err| {
+                            error!("remove file {:?} failed: {}", gv.output, err);
+                        })?;
                         return Err(e);
                     }
                 }
-                if seed_time > 0 {
-                    // Hand the file off to the long-lived seed service (dfdaemon)
-                    // by writing a manifest; dfget itself exits immediately, so a
-                    // spawned task here would be killed before it could seed.
-                    let registry_dir = p2p::default_registry_dir();
-                    match p2p::register_seed(
-                        &registry_dir,
-                        &tracker_url,
-                        &key,
-                        &output_clone,
-                        Duration::from_secs(seed_time),
-                    ) {
-                        Ok(()) => info!(
-                            "registered {:?} for P2P seeding ({}s); served by dfdaemon",
-                            output_clone, seed_time
-                        ),
-                        Err(e) => warn!("could not register seed (will not seed): {e}"),
-                    }
-                }
+                register_gguf_seed(&tracker_url, &key, &output_clone, seed_time);
                 progress_bar.finish_with_message("done (P2P)");
                 return Ok(());
             }
@@ -1408,10 +1398,49 @@ async fn download(
 
             return Err(err);
         }
+
+        // The Dragonfly/HF fallback path succeeded for a gguf:// download. Register
+        // the file for P2P seeding too, so the *first* downloader (who found no peers
+        // and fell back) still becomes a seed for everyone after them. Skipped only
+        // when P2P is disabled entirely (--no-p2p).
+        if !args.no_p2p {
+            let key = p2p::content_key(
+                args.url.as_str(),
+                &args.hf_revision,
+                args.hf_base_url.as_deref(),
+            );
+            register_gguf_seed(&args.p2p_tracker, &key, &args.output, args.seed_time);
+        }
     }
 
     progress_bar.finish();
     Ok(())
+}
+
+/// Hand a freshly downloaded gguf:// file off to the long-lived seed service
+/// (dfdaemon) by writing a seed manifest. dfget itself exits immediately, so a
+/// task spawned here would be killed before it could seed. Best-effort: a failure
+/// to register only means the file will not be seeded, never that the download
+/// failed. A `seed_time` of 0 disables seeding.
+fn register_gguf_seed(tracker_url: &str, content_key: &str, output: &Path, seed_time: u64) {
+    if seed_time == 0 {
+        return;
+    }
+
+    let registry_dir = p2p::default_registry_dir();
+    match p2p::register_seed(
+        &registry_dir,
+        tracker_url,
+        content_key,
+        output,
+        Duration::from_secs(seed_time),
+    ) {
+        Ok(()) => info!(
+            "registered {:?} for P2P seeding ({}s); served by a running dfdaemon",
+            output, seed_time
+        ),
+        Err(e) => warn!("could not register seed (will not seed): {e}"),
+    }
 }
 
 /// GgufVerification holds the inputs needed to verify a downloaded gguf:// file after download.
