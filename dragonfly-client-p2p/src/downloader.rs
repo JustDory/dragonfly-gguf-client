@@ -78,8 +78,19 @@ async fn try_download_from_peer(
         .open(output)
         .await?;
 
-    tokio::io::copy(&mut recv, &mut file).await?;
+    let copied = tokio::io::copy(&mut recv, &mut file).await?;
     file.flush().await?;
+
+    // The peer told us how many bytes to expect. If the stream ended early (or
+    // ran long), the transfer is corrupt — and SHA verification may be skipped
+    // when no digest is available, so never leave a truncated file on disk.
+    if copied != file_len {
+        drop(file);
+        let _ = tokio::fs::remove_file(output).await;
+        return Err(anyhow::anyhow!(
+            "P2P transfer size mismatch: expected {file_len} bytes, got {copied}"
+        ));
+    }
 
     tracing::info!("P2P download complete");
     Ok(())

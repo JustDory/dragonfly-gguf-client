@@ -110,6 +110,13 @@ struct Args {
     console: bool,
 
     #[arg(
+        long = "no-gguf-seed",
+        default_value_t = false,
+        help = "Disable the gguf P2P seed service (on by default; also DRAGONFLY_GGUF_SEED=0)"
+    )]
+    no_gguf_seed: bool,
+
+    #[arg(
         short = 'V',
         long = "version",
         help = "Print version information",
@@ -432,19 +439,20 @@ async fn main() -> Result<(), anyhow::Error> {
         shutdown_complete_tx.clone(),
     );
 
-    // Initialize the gguf P2P seed service registry (opt-in via env). When
-    // enabled, dfdaemon hosts a persistent Iroh endpoint that seeds every file
-    // dfget registers in the shared registry directory.
-    let gguf_seed_registry: Option<PathBuf> = if std::env::var_os("DRAGONFLY_GGUF_SEED")
-        .is_some_and(|v| v != "0" && !v.is_empty())
-    {
+    // The gguf P2P seed service is on by default: dfdaemon hosts a persistent
+    // Iroh endpoint that seeds every file dfget registers in the shared registry
+    // directory. Opt out with `--no-gguf-seed` or `DRAGONFLY_GGUF_SEED=0`.
+    let gguf_seeding_disabled = args.no_gguf_seed
+        || std::env::var_os("DRAGONFLY_GGUF_SEED").is_some_and(|v| v == "0");
+    let gguf_seed_registry: Option<PathBuf> = if gguf_seeding_disabled {
+        info!("gguf P2P seeding disabled");
+        None
+    } else {
         let dir = std::env::var_os("DRAGONFLY_GGUF_SEED_REGISTRY")
             .map(PathBuf::from)
             .unwrap_or_else(dragonfly_client_p2p::default_registry_dir);
         info!("gguf P2P seeding enabled, registry {:?}", dir);
         Some(dir)
-    } else {
-        None
     };
 
     // Log dfdaemon started pid and whether it is running in container.
