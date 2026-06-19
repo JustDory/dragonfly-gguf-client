@@ -1346,7 +1346,7 @@ async fn download(
 
                         downloaded += piece.length;
                         let position = min(
-                            downloaded + piece.length,
+                            downloaded,
                             progress_bar.length().unwrap_or(0),
                         );
                         progress_bar.set_position(position);
