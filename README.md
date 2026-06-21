@@ -39,15 +39,24 @@ dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf 
 
 No Rust toolchain needed. Three ways to get started, in order of complexity:
 
-### 1 — Use the community tracker (zero setup)
+### 1 — Pre-built binary (Linux x86\_64, zero setup)
 
-Download any GGUF model and automatically join the P2P swarm once you build `dfget`:
+No Rust, no Docker — download and run:
 
 ```shell
-dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf \
+# Download dfget
+curl -fsSL -o dfget \
+  https://github.com/JustDory/dragonfly-gguf-client/releases/download/v0.1.0-tracker/dfget-x86_64-linux
+chmod +x dfget
+
+# Pull a model from the community swarm
+./dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf \
   -O ./model.gguf \
   --p2p-tracker https://tracker.dragonfly-gguf.dev
 ```
+
+> Requires Linux x86\_64 with glibc 2.35+ (Ubuntu 22.04+, Debian 12+, Fedora 36+).
+> macOS / Windows / older distros → see [Docker](#2--run-your-own-tracker) or [Build from source](#build-from-source).
 
 ### 2 — Run your own tracker
 
