@@ -3,7 +3,7 @@
 # Run on the EC2 instance: sudo bash setup-nginx.sh
 set -euo pipefail
 
-REPO_URL="https://raw.githubusercontent.com/JustDory/dragonfly-gguf-client/main"
+REPO_URL="https://raw.githubusercontent.com/JustDory/dragonfly-gguf-client/feature/gguf-backend"
 WEB_ROOT="/var/www/dragonfly-gguf"
 
 echo "==> Installing nginx..."
@@ -16,8 +16,10 @@ mkdir -p "$WEB_ROOT"
 # Fetch the landing page from the repo (or copy from local if running in checkout)
 if [[ -f "$(dirname "$0")/index.html" ]]; then
   cp "$(dirname "$0")/index.html" "$WEB_ROOT/index.html"
+  cp "$(dirname "$0")/about.html" "$WEB_ROOT/about.html"
 else
   curl -sSf "$REPO_URL/deploy/ec2/index.html" -o "$WEB_ROOT/index.html"
+  curl -sSf "$REPO_URL/deploy/ec2/about.html" -o "$WEB_ROOT/about.html"
 fi
 
 echo "==> Writing nginx config..."
@@ -33,6 +35,11 @@ server {
     # Landing page
     location = / {
         try_files /index.html =404;
+    }
+
+    # About / original landing page
+    location = /about {
+        try_files /about.html =404;
     }
 
     # Proxy tracker API endpoints to the Rust binary on 8080
