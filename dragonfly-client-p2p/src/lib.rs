@@ -1,9 +1,11 @@
 mod downloader;
 mod node;
 mod seeder;
+pub mod seed_import;
 mod tracker;
 
 pub use seeder::{default_registry_dir, register_seed, run_seed_service, SeedManifest};
+pub use seed_import::{default_hf_cache_dir, scan_hf_cache, SeedCandidate};
 pub use tracker::TrackerClient;
 
 use anyhow::Result;

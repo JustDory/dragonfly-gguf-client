@@ -55,6 +55,7 @@ use tracing::{debug, error, info, warn, Instrument, Level};
 use url::Url;
 use uuid::Uuid;
 
+mod seed_import;
 mod update_notice;
 
 const LONG_ABOUT: &str = r#"
@@ -477,6 +478,13 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // "dfget seed-import [opts]" is dispatched before clap parses Args, because
+    // Args requires a positional URL that seed-import doesn't provide.
+    let raw_args: Vec<String> = std::env::args().collect();
+    if raw_args.get(1).map(|s| s.as_str()) == Some("seed-import") {
+        return seed_import::run(&raw_args[2..]).await;
+    }
+
     // Parse command line arguments.
     let args = convert_args(Args::parse());
 
