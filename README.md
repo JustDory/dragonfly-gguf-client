@@ -28,10 +28,68 @@ peer-to-peer delivery mechanisms for GGUF models:
 # Dragonfly P2P (requires a running cluster)
 dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf -O ./model.gguf
 
-# Iroh P2P (works from any network, no signup)
+# Iroh P2P — community tracker is live, works from any network, no signup
 dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf \
-  -O ./model.gguf --p2p-tracker http://your-tracker:8080
+  -O ./model.gguf --p2p-tracker https://tracker.dragonfly-gguf.dev
 ```
+
+> **🌐 Community tracker is live** — [`tracker.dragonfly-gguf.dev`](https://tracker.dragonfly-gguf.dev) hosts a public model registry and P2P peer discovery endpoint. Browse the top 50 GGUF models, check live availability, and grab ready-to-run `dfget` commands. Point any `dfget` call at `--p2p-tracker https://tracker.dragonfly-gguf.dev` to join the swarm.
+
+## 🐳 Docker Quickstart
+
+No Rust toolchain needed. Three ways to get started, in order of complexity:
+
+### 1 — Use the community tracker (zero setup)
+
+Download any GGUF model and automatically join the P2P swarm once you build `dfget`:
+
+```shell
+dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf \
+  -O ./model.gguf \
+  --p2p-tracker https://tracker.dragonfly-gguf.dev
+```
+
+### 2 — Run your own tracker
+
+```shell
+# Pull and start the tracker on port 8080
+docker run -d --name dragonfly-tracker \
+  -p 8080:8080 \
+  --restart unless-stopped \
+  ghcr.io/justdory/dragonfly-gguf-client/tracker:latest
+
+# Verify it's healthy
+curl http://localhost:8080/peers?content_key=0000000000000000000000000000000000000000000000000000000000000000
+# → {"providers":[]}
+```
+
+### 3 — Full seeder stack (tracker + dfdaemon seed peer)
+
+Spins up the tracker, a Dragonfly seed daemon, and the required control-plane services (manager, scheduler, Redis, MySQL) in one command:
+
+```shell
+git clone https://github.com/JustDory/dragonfly-gguf-client.git
+cd dragonfly-gguf-client/deploy/tracker
+
+docker compose up -d
+
+# Watch services come up (~30 s for control plane to be healthy)
+docker compose ps
+
+# Download a model through the local P2P stack
+dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf \
+  -O ./model.gguf \
+  --p2p-tracker http://localhost:8080
+
+# Check tracker peers after the download — your seeder should appear
+curl http://localhost:8080/peers?content_key=$(
+  echo -n "hf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf:main" \
+  | sha256sum | awk '{print $1}')
+```
+
+> **Note:** the first `docker compose up` builds the seeder image from source — this takes a few minutes. Subsequent starts are instant.
+
+---
 
 ## ✨ Features
 
@@ -193,7 +251,7 @@ expires. See [Enabling seeding](#enabling-seeding-dfdaemon).
 
 | Flag | Default | Env var | Description |
 |---|---|---|---|
-| `--p2p-tracker <url>` | *(community tracker)* | `DRAGONFLY_P2P_TRACKER` | Tracker URL for peer discovery |
+| `--p2p-tracker <url>` | `https://tracker.dragonfly-gguf.dev` | `DRAGONFLY_P2P_TRACKER` | Tracker URL for peer discovery |
 | `--no-p2p` | false | `DRAGONFLY_NO_P2P` | Skip Iroh P2P entirely |
 | `--prefer-dragonfly` | false | `DRAGONFLY_PREFER_DRAGONFLY` | Skip Iroh, go straight to Dragonfly |
 | `--seed-time <secs>` | 3600 | `DRAGONFLY_SEED_TIME` | How long the registered seed stays live |
@@ -355,7 +413,7 @@ with this fork's client image substituted for the peers.
 - [x] Hugging Face LFS `sha256` integrity verification — wired into the `dfget` download path
 - [x] **Iroh P2P** — permissionless NAT-transparent peer sharing with automatic seeding
 - [x] `dragonfly-tracker` — lightweight peer-discovery HTTP service
-- [ ] Deploy community tracker at `tracker.dragonfly-gguf.dev`
+- [x] Deploy community tracker at [`tracker.dragonfly-gguf.dev`](https://tracker.dragonfly-gguf.dev) — live with dynamic model registry
 - [ ] Surface parsed GGUF metadata (architecture / quantization) on the CLI
 - [ ] Recursive repo download (`gguf://owner/repo` → every `.gguf` in the repo)
 - [ ] Sharded / multi-part GGUF (`model-00001-of-0000N.gguf`)
