@@ -262,7 +262,7 @@ const HF_API   = 'https://huggingface.co/api/models';
 const QUANT_PREFS = ['Q4_K_M','Q4_K_S','Q5_K_M','Q4_K','Q5_K','Q3_K_M','Q4_0','Q5_0','Q8_0'];
 
 function formatBytes(n) {
-  if (!n) return '?';
+  if (!n) return '—';
   return n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.round(n / 1e6) + ' MB';
 }
 
@@ -276,13 +276,13 @@ function extractQuant(filename) {
   return m ? m[1].toUpperCase() : 'GGUF';
 }
 
-function pickBestFile(siblings) {
+function pickFilename(siblings) {
   const ggufs = (siblings || []).filter(s => s.rfilename.toLowerCase().endsWith('.gguf'));
   for (const q of QUANT_PREFS) {
     const hit = ggufs.find(s => s.rfilename.toUpperCase().includes(q));
-    if (hit) return hit;
+    if (hit) return hit.rfilename;
   }
-  return ggufs[0] || null;
+  return ggufs[0]?.rfilename || null;
 }
 
 function setStatus(tr, state) {
@@ -293,13 +293,6 @@ function setStatus(tr, state) {
   lbl.textContent = { available: 'Available', unavailable: 'Unavailable', partial: 'Peers only', checking: 'Checking…' }[state] || state;
 }
 
-async function checkHF(repo) {
-  try {
-    const r = await fetch(`https://huggingface.co/api/models/${repo}`, { signal: AbortSignal.timeout(8000) });
-    return r.ok;
-  } catch { return false; }
-}
-
 async function init() {
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--muted);">Loading top GGUF models from Hugging Face…</td></tr>';
@@ -307,7 +300,7 @@ async function init() {
   let data;
   try {
     const resp = await fetch(
-      `${HF_API}?tags=gguf&sort=downloads&direction=-1&limit=50&full=true`,
+      `${HF_API}?filter=gguf&pipeline_tag=text-generation&sort=downloads&direction=-1&limit=50&full=true`,
       { signal: AbortSignal.timeout(20000) }
     );
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -321,16 +314,15 @@ async function init() {
   const rows = [];
 
   for (const model of data) {
-    const file = pickBestFile(model.siblings);
-    if (!file) continue;
+    const filename = pickFilename(model.siblings);
+    if (!filename) continue;
 
     const repo        = model.id;
     const repoName    = repo.split('/').pop();
     const displayName = repoName.replace(/-GGUF$/i, '');
     const params      = extractParams(repoName);
-    const quant       = extractQuant(file.rfilename);
-    const size        = formatBytes(file.lfs?.size || file.size);
-    const url         = `gguf://${repo}/${file.rfilename}`;
+    const quant       = extractQuant(filename);
+    const url         = `gguf://${repo}/${filename}`;
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -339,7 +331,7 @@ async function init() {
         <span class="quant-tag">${quant}</span>
       </td>
       <td class="params-cell">${params}</td>
-      <td class="size-cell">${size}</td>
+      <td class="size-cell">—</td>
       <td>
         <div class="status-cell">
           <span class="dot checking"></span>
@@ -349,7 +341,7 @@ async function init() {
       <td class="dfget-col"><code>dfget --p2p-tracker ${TRACKER} ${url}</code></td>
     `;
     tbody.appendChild(tr);
-    rows.push({ tr, repo });
+    rows.push({ tr, repo, quant });
   }
 
   if (!rows.length) {
@@ -357,9 +349,19 @@ async function init() {
     return;
   }
 
-  await Promise.all(rows.map(async ({ tr, repo }) => {
-    const ok = await checkHF(repo);
-    setStatus(tr, ok ? 'available' : 'unavailable');
+  // Fetch per-model blob info: fills in real file size and confirms accessibility
+  await Promise.all(rows.map(async ({ tr, repo, quant }) => {
+    try {
+      const r = await fetch(`${HF_API}/${repo}?blobs=true`, { signal: AbortSignal.timeout(12000) });
+      if (!r.ok) { setStatus(tr, 'unavailable'); return; }
+      const m = await r.json();
+      const ggufs = (m.siblings || []).filter(s => s.rfilename.toLowerCase().endsWith('.gguf'));
+      const file = ggufs.find(s => s.rfilename.toUpperCase().includes(quant)) || ggufs[0];
+      if (file) tr.querySelector('.size-cell').textContent = formatBytes(file.size || file.lfs?.size);
+      setStatus(tr, 'available');
+    } catch {
+      setStatus(tr, 'unavailable');
+    }
   }));
 }
 
