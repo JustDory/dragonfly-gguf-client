@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dragonfly GGUF — Model Registry</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --accent-dim: #1f6feb;
+      --green: #3fb950;
+      --red: #f85149;
+      --yellow: #d29922;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --code-bg: #1c2128;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    .badge {
+      background: var(--accent-dim);
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      margin-left: 1.5rem;
+      transition: color 0.15s;
+    }
+    nav a:hover { color: var(--text); }
+    nav a.active { color: var(--text); }
+
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 2.5rem 2rem 4rem;
+    }
+
+    .page-header {
+      margin-bottom: 1.75rem;
+    }
+
+    .page-header h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.3rem;
+    }
+
+    .page-header p {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+
+    thead tr {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      text-align: left;
+      padding: 0.75rem 1rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background 0.1s;
+    }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--surface); }
+
+    td {
+      padding: 0.85rem 1rem;
+      vertical-align: middle;
+    }
+
+    .model-name a {
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .model-name a:hover { color: var(--accent); text-decoration: underline; }
+
+    .quant-tag {
+      display: inline-block;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.1rem 0.4rem;
+      font-size: 0.72rem;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      color: var(--muted);
+      margin-left: 0.5rem;
+      vertical-align: middle;
+    }
+
+    .size-cell { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+    .params-cell { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+
+    .status-cell {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    .dot.checking  { background: var(--border); }
+    .dot.available { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .dot.unavailable { background: var(--red); }
+    .dot.partial   { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+
+    .status-label {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .status-label.available   { color: var(--green); }
+    .status-label.unavailable { color: var(--red); }
+    .status-label.partial     { color: var(--yellow); }
+
+    .dfget-col {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.78rem;
+      color: var(--muted);
+      max-width: 340px;
+    }
+    .dfget-col code {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .dfget-col code:hover { overflow: visible; white-space: normal; word-break: break-all; }
+
+    .legend {
+      display: flex;
+      gap: 1.25rem;
+      margin-top: 1rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      flex-wrap: wrap;
+    }
+    .legend-item { display: flex; align-items: center; gap: 0.4rem; }
+  </style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="logo">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/>
+    </svg>
+    dragonfly-gguf
+    <span class="badge">Alpha</span>
+  </a>
+  <nav>
+    <a href="/" class="active">Models</a>
+    <a href="/about">About</a>
+    <a href="https://github.com/JustDory/dragonfly-gguf-client" target="_blank" rel="noopener">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <div class="page-header">
+    <h1>GGUF Model Registry</h1>
+    <p>Live availability across HuggingFace and P2P peers &mdash; click any model to view on HuggingFace</p>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Params</th>
+          <th>Size</th>
+          <th>Status</th>
+          <th>dfget command</th>
+        </tr>
+      </thead>
+      <tbody id="tbody">
+        <tr>
+          <td colspan="5" style="text-align:center;padding:2rem;color:var(--muted);">Checking availability…</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="legend">
+    <span class="legend-item"><span class="dot available"></span> Available on HuggingFace</span>
+    <span class="legend-item"><span class="dot partial"></span> Peers only</span>
+    <span class="legend-item"><span class="dot unavailable"></span> Unavailable</span>
+    <span class="legend-item"><span class="dot checking"></span> Checking…</span>
+  </div>
+</main>
+
+<script>
+const TRACKER = 'https://tracker.dragonfly-gguf.dev';
+const HF_API   = 'https://huggingface.co/api/models';
+
+const QUANT_PREFS = ['Q4_K_M','Q4_K_S','Q5_K_M','Q4_K','Q5_K','Q3_K_M','Q4_0','Q5_0','Q8_0'];
+
+function formatBytes(n) {
+  if (!n) return '—';
+  return n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.round(n / 1e6) + ' MB';
+}
+
+function extractParams(repoName) {
+  const m = repoName.match(/[_-](\d+(?:\.\d+)?)[bB](?:[_-]|$)/);
+  return m ? m[1] + 'B' : '—';
+}
+
+function extractQuant(filename) {
+  const m = filename.match(/[_-](Q\d[^.]+)\.gguf$/i);
+  return m ? m[1].toUpperCase() : 'GGUF';
+}
+
+function pickFilename(siblings) {
+  const ggufs = (siblings || []).filter(s => s.rfilename.toLowerCase().endsWith('.gguf'));
+  for (const q of QUANT_PREFS) {
+    const hit = ggufs.find(s => s.rfilename.toUpperCase().includes(q));
+    if (hit) return hit.rfilename;
+  }
+  return ggufs[0]?.rfilename || null;
+}
+
+function setStatus(tr, state) {
+  const dot = tr.querySelector('.dot');
+  const lbl = tr.querySelector('.status-label');
+  dot.className = 'dot ' + state;
+  lbl.className = 'status-label ' + state;
+  lbl.textContent = { available: 'Available', unavailable: 'Unavailable', partial: 'Peers only', checking: 'Checking…' }[state] || state;
+}
+
+async function init() {
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--muted);">Loading top GGUF models from Hugging Face…</td></tr>';
+
+  let data;
+  try {
+    const resp = await fetch(
+      `${HF_API}?filter=gguf&pipeline_tag=text-generation&sort=downloads&direction=-1&limit=50&full=true`,
+      { signal: AbortSignal.timeout(20000) }
+    );
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    data = await resp.json();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--red);">Failed to load model list: ${e.message}</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = '';
+  const rows = [];
+
+  for (const model of data) {
+    const filename = pickFilename(model.siblings);
+    if (!filename) continue;
+
+    const repo        = model.id;
+    const repoName    = repo.split('/').pop();
+    const displayName = repoName.replace(/-GGUF$/i, '');
+    const params      = extractParams(repoName);
+    const quant       = extractQuant(filename);
+    const url         = `gguf://${repo}/${filename}`;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="model-name">
+        <a href="https://huggingface.co/${repo}" target="_blank" rel="noopener">${displayName}</a>
+        <span class="quant-tag">${quant}</span>
+      </td>
+      <td class="params-cell">${params}</td>
+      <td class="size-cell">—</td>
+      <td>
+        <div class="status-cell">
+          <span class="dot checking"></span>
+          <span class="status-label">Checking…</span>
+        </div>
+      </td>
+      <td class="dfget-col"><code>dfget --p2p-tracker ${TRACKER} ${url}</code></td>
+    `;
+    tbody.appendChild(tr);
+    rows.push({ tr, repo, quant });
+  }
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--muted);">No GGUF models found.</td></tr>';
+    return;
+  }
+
+  // Fetch per-model blob info: fills in real file size and confirms accessibility
+  await Promise.all(rows.map(async ({ tr, repo, quant }) => {
+    try {
+      const r = await fetch(`${HF_API}/${repo}?blobs=true`, { signal: AbortSignal.timeout(12000) });
+      if (!r.ok) { setStatus(tr, 'unavailable'); return; }
+      const m = await r.json();
+      const ggufs = (m.siblings || []).filter(s => s.rfilename.toLowerCase().endsWith('.gguf'));
+      const file = ggufs.find(s => s.rfilename.toUpperCase().includes(quant)) || ggufs[0];
+      if (file) tr.querySelector('.size-cell').textContent = formatBytes(file.size || file.lfs?.size);
+      setStatus(tr, 'available');
+    } catch {
+      setStatus(tr, 'unavailable');
+    }
+  }));
+}
+
+init();
+</script>
+
+</body>
+</html>

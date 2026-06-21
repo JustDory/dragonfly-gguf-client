@@ -1,0 +1,72 @@
+console: true
+
+log:
+  level: info
+
+host:
+  idc: ""
+  location: ""
+  # Must match the static IP assigned to the seeder in docker-compose.yml.
+  # Dragonfly rejects hostnames here — it must be a real IP.
+  ip: 172.31.0.7
+
+server:
+  pluginDir: /var/lib/dragonfly/plugins/dfdaemon/
+  cacheDir: /var/cache/dragonfly/dfdaemon/
+
+download:
+  server:
+    socketPath: /var/run/dragonfly/dfdaemon.sock
+  bandwidthLimit: 50GB
+  backToSourceBandwidthLimit: 50GB
+  pieceTimeout: 40s
+  concurrentPieceCount: 10
+
+upload:
+  server:
+    port: 4000
+  disableShared: false
+  bandwidthLimit: 50GB
+
+manager:
+  addr: http://manager:65003
+
+scheduler:
+  announceInterval: 10s
+  scheduleTimeout: 30s
+  maxScheduleCount: 5
+  enableBackToSource: true
+
+# This is the Dragonfly seed-peer role (different from Iroh seeding).
+# Set to false: the seeder is a regular peer, not a Dragonfly seed peer.
+seedPeer:
+  enable: false
+
+dynconfig:
+  refreshInterval: 1m
+
+storage:
+  server:
+    tcpPort: 4005
+    quicPort: 4006
+  dir: /data/dragonfly
+  keep: true
+
+gc:
+  interval: 900s
+  policy:
+    taskTTL: 21600s
+    distHighThresholdPercent: 80
+    distLowThresholdPercent: 60
+
+proxy:
+  server:
+    port: 4001
+
+health:
+  server:
+    port: 4003
+
+metrics:
+  server:
+    port: 4002
