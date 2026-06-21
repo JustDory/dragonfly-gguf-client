@@ -1,17 +1,183 @@
+# Dragonfly GGUF Client — tracker + seeder stack
+#
+# Services
+# ─────────────────────────────────────────────────────────────────────────────
+#   tracker   custom Iroh P2P peer-discovery server (host port 8080)
+#   seeder    dfdaemon with GGUF Iroh seeding on by default
+#   manager   Dragonfly manager — required for dfdaemon to start
+#   scheduler Dragonfly scheduler — required for dfdaemon to start
+#   redis     required by manager
+#   mysql     required by manager
+#
+# Network: 172.31.0.0/24 (avoids conflict with the dev cluster at 172.30.0.0/24)
+#   redis     172.31.0.2   mysql     172.31.0.3
+#   manager   172.31.0.4   scheduler 172.31.0.5
+#   tracker   172.31.0.6   seeder    172.31.0.7
+#
+# Important notes
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. DRAGONFLY_P2P_TRACKER is the correct env-var name for dfget (not
+#    DRAGONFLY_TRACKER_URL). dfdaemon reads tracker URLs from per-manifest JSON
+#    written by dfget, so both services see https://tracker.dragonfly-gguf.dev.
+#
+# 2. Iroh's endpoint binds to a random UDP port via presets::N0 — there is
+#    currently no env-var to pin it to 58454 without a Rust code change.
+#    The 58454/udp mapping is aspirational:
+#      - Relay-based P2P always works regardless of port mapping.
+#      - Direct hole-punching requires pinning Iroh's bind port (ROADMAP item).
+#    Adding `.bind_addr_v4("0.0.0.0:58454")` in seeder.rs would activate it.
+#
+# 3. advertiseIP fields in config/ must be real IPs, not hostnames.
+#    Dragonfly validates them and panics on hostnames.
+
 services:
+
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+
+  redis:
+    image: redis:7-alpine
+    container_name: gguf-redis
+    command: --requirepass dragonfly
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "dragonfly", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      gguf-net:
+        ipv4_address: 172.31.0.2
+    restart: unless-stopped
+
+  mysql:
+    image: mariadb:10.11
+    container_name: gguf-mysql
+    environment:
+      MARIADB_USER: dragonfly
+      MARIADB_PASSWORD: dragonfly
+      MARIADB_DATABASE: manager
+      MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      gguf-net:
+        ipv4_address: 172.31.0.3
+    restart: unless-stopped
+
+  # ── Dragonfly control plane ─────────────────────────────────────────────────
+
+  manager:
+    image: dragonflyoss/manager:latest
+    container_name: gguf-manager
+    depends_on:
+      redis:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./config/manager.yaml:/etc/dragonfly/manager.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/bin/grpc_health_probe -addr=:65003 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks:
+      gguf-net:
+        ipv4_address: 172.31.0.4
+    restart: unless-stopped
+
+  scheduler:
+    image: dragonflyoss/scheduler:latest
+    container_name: gguf-scheduler
+    depends_on:
+      manager:
+        condition: service_healthy
+    volumes:
+      - ./config/scheduler.yaml:/etc/dragonfly/scheduler.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/bin/grpc_health_probe -addr=:8002 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks:
+      gguf-net:
+        ipv4_address: 172.31.0.5
+    restart: unless-stopped
+
+  # ── Application services ────────────────────────────────────────────────────
+
   tracker:
     build:
       context: ../../
       dockerfile: deploy/tracker/Dockerfile
-    ports:
-      - "8080:8080"
+    container_name: gguf-tracker
     environment:
       TRACKER_BIND: "0.0.0.0:8080"
       TRACKER_TTL: "1800"
       TRACKER_RATE_LIMIT: "10"
-    restart: unless-stopped
+    ports:
+      - "8080:8080"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/peers?content_key=0000000000000000000000000000000000000000000000000000000000000000"]
       interval: 30s
       timeout: 5s
       retries: 3
+    networks:
+      gguf-net:
+        ipv4_address: 172.31.0.6
+    restart: unless-stopped
+
+  seeder:
+    build:
+      context: ../../
+      dockerfile: deploy/seeder/Dockerfile
+    container_name: gguf-seeder
+    depends_on:
+      manager:
+        condition: service_healthy
+      scheduler:
+        condition: service_healthy
+    environment:
+      # dfget peer-discovery URL (correct env-var name, see note 1 above).
+      DRAGONFLY_P2P_TRACKER: "https://tracker.dragonfly-gguf.dev"
+      # XDG_DATA_HOME controls default_registry_dir() for BOTH dfget and
+      # dfdaemon. With XDG_DATA_HOME=/data both compute /data/dragonfly/gguf-seeds
+      # so manifests written by dfget are found by the dfdaemon seed service.
+      # (DRAGONFLY_GGUF_SEED_REGISTRY overrides only dfdaemon, not dfget.)
+      XDG_DATA_HOME: "/data"
+    volumes:
+      - ./config/seeder.yaml:/etc/dragonfly/dfdaemon.yaml:ro
+      - dragonfly_cache:/data/dragonfly
+    ports:
+      # Health check endpoint.
+      - "4003:4003"
+      # Iroh best-effort UDP (see note 2 above — relay fallback always works).
+      - "58454:58454/udp"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4003/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      gguf-net:
+        ipv4_address: 172.31.0.7
+    restart: unless-stopped
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+
+volumes:
+  # Block storage for Dragonfly task pieces.
+  # gguf-seeds/ lives here as a natural subdirectory — no nested volume mount,
+  # which avoids EXDEV on the atomic rename inside register_seed().
+  dragonfly_cache:
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+
+networks:
+  gguf-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24

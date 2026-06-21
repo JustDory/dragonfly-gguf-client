@@ -1,0 +1,69 @@
+server:
+  grpc:
+    # advertiseIP must be a real IP, not a hostname — Dragonfly validates it.
+    advertiseIP: 172.31.0.4
+    port:
+      start: 65003
+      end: 65003
+  rest:
+    addr: :8080
+
+auth:
+  jwt:
+    realm: Dragonfly
+    key: ZHJhZ29uZmx5Cg==
+    timeout: 48h
+    maxRefresh: 48h
+
+database:
+  type: mysql
+  mysql:
+    user: dragonfly
+    password: dragonfly
+    host: mysql
+    port: 3306
+    dbname: manager
+    migrate: true
+  redis:
+    addrs:
+      - "redis:6379"
+    masterName: ""
+    username: ""
+    password: dragonfly
+    db: 0
+    brokerDB: 1
+    backendDB: 2
+
+cache:
+  redis:
+    ttl: 5m
+  local:
+    size: 200000
+    ttl: 3m
+
+job:
+  rateLimit:
+    fillInterval: 1m
+    capacity: 5
+    quantum: 5
+  gc:
+    interval: 24h
+    ttl: 24h
+  syncPeers:
+    interval: 24h
+    timeout: 10m
+  preheat:
+    registryTimeout: 1m
+    tls:
+      insecureSkipVerify: false
+
+metrics:
+  enable: true
+  addr: :8000
+  enablePeerGauge: true
+
+network:
+  enableIPv6: false
+
+console: true
+pprofPort: -1

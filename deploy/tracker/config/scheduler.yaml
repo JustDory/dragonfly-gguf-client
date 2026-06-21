@@ -1,0 +1,63 @@
+server:
+  # advertiseIP must be a real IP, not a hostname — Dragonfly validates it.
+  advertiseIP: 172.31.0.5
+  port: 8002
+
+scheduler:
+  algorithm: default
+  backToSourceCount: 200
+  retryBackToSourceLimit: 3
+  retryLimit: 5
+  retryInterval: 400ms
+  gc:
+    pieceDownloadTimeout: 30m
+    peerGCInterval: 10s
+    peerTTL: 24h
+    taskGCInterval: 30m
+    hostGCInterval: 5m
+    hostTTL: 1h
+
+database:
+  redis:
+    addrs:
+      - "redis:6379"
+    masterName: ""
+    username: ""
+    password: dragonfly
+    brokerDB: 1
+    backendDB: 2
+
+dynConfig:
+  refreshInterval: 1m
+
+host:
+  idc: ""
+  location: ""
+
+manager:
+  addr: "manager:65003"
+  schedulerClusterID: 1
+  keepAlive:
+    interval: 5s
+
+job:
+  enable: true
+  globalWorkerNum: 500
+  schedulerWorkerNum: 500
+  localWorkerNum: 1000
+
+storage:
+  maxSize: 100
+  maxBackups: 10
+  bufferSize: 100
+
+metrics:
+  enable: true
+  addr: :8000
+  enableHost: false
+
+network:
+  enableIPv6: false
+
+console: true
+pprofPort: -1
