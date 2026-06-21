@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dragonfly GGUF — P2P Model Distribution</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --accent-dim: #1f6feb;
+      --green: #3fb950;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --code-bg: #1c2128;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    .logo svg { flex-shrink: 0; }
+
+    .badge {
+      background: var(--accent-dim);
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      margin-left: 1.5rem;
+      transition: color 0.15s;
+    }
+    nav a:hover { color: var(--text); }
+
+    main {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 3rem 2rem 4rem;
+    }
+
+    .hero { text-align: center; margin-bottom: 3.5rem; }
+
+    .hero h1 {
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
+      font-weight: 700;
+      line-height: 1.2;
+      margin-bottom: 1rem;
+      background: linear-gradient(135deg, var(--text) 40%, var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero p {
+      color: var(--muted);
+      font-size: 1.1rem;
+      max-width: 560px;
+      margin: 0 auto 2rem;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.55rem 1.2rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      text-decoration: none;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: var(--accent-dim); color: #fff; }
+    .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+
+    section { margin-bottom: 2.5rem; }
+
+    h2 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      font-size: 0.875rem;
+      line-height: 1.7;
+    }
+    code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+    pre code { color: var(--text); }
+    .comment { color: var(--muted); }
+    .kw { color: #ff7b72; }
+    .str { color: #a5d6ff; }
+    .cmd { color: var(--green); }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+    }
+    .card-icon { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.35rem; }
+    .card p { font-size: 0.85rem; color: var(--muted); }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      font-size: 0.9rem;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      flex-shrink: 0;
+    }
+
+    .status-row a { color: var(--accent); text-decoration: none; margin-left: auto; font-size: 0.85rem; }
+    .status-row a:hover { text-decoration: underline; }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 1.5rem 2rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="logo">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/>
+    </svg>
+    dragonfly-gguf
+    <span class="badge">Alpha</span>
+  </a>
+  <nav>
+    <a href="https://github.com/JustDory/dragonfly-gguf-client" target="_blank" rel="noopener">GitHub</a>
+    <a href="/peers?content_key=0000000000000000000000000000000000000000000000000000000000000000">Tracker API</a>
+  </nav>
+</header>
+
+<main>
+
+  <div class="hero">
+    <h1>P2P distribution for GGUF models</h1>
+    <p>Download large language models faster by swarming with nearby peers — no central server required.</p>
+    <div class="btn-row">
+      <a href="https://github.com/JustDory/dragonfly-gguf-client" target="_blank" rel="noopener" class="btn btn-primary">
+        <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        View on GitHub
+      </a>
+      <a href="https://github.com/JustDory/dragonfly-gguf-client#readme" target="_blank" rel="noopener" class="btn btn-secondary">
+        Documentation
+      </a>
+    </div>
+  </div>
+
+  <section>
+    <h2>Quick Start</h2>
+    <pre><code><span class="comment"># Install</span>
+<span class="cmd">cargo install</span> <span class="str">dragonfly-gguf-client</span>
+
+<span class="comment"># Download a model via P2P (falls back to HuggingFace if no peers)</span>
+<span class="cmd">dfget</span> <span class="str">gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf</span>
+
+<span class="comment"># Use a custom tracker (this server)</span>
+<span class="cmd">dfget</span> --p2p-tracker <span class="str">https://tracker.dragonfly-gguf.dev</span> <span class="str">gguf://...</span></code></pre>
+  </section>
+
+  <section>
+    <h2>How It Works</h2>
+    <div class="cards">
+      <div class="card">
+        <div class="card-icon">🔍</div>
+        <h3>Peer Discovery</h3>
+        <p>This tracker matches downloaders with peers who already have the model — by content hash, not filename.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">⚡</div>
+        <h3>Iroh P2P</h3>
+        <p>Uses QUIC with automatic NAT hole-punching and relay fallback. Works on any network without port forwarding.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">🛡️</div>
+        <h3>Verified Downloads</h3>
+        <p>Every model is verified against its HuggingFace SHA-256 digest before use. Corrupt transfers are rejected.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">🌱</div>
+        <h3>Auto Seeding</h3>
+        <p>After downloading, <code>dfdaemon</code> automatically re-seeds the model to new peers in the background.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Tracker Status</h2>
+    <div class="status-row">
+      <span class="dot"></span>
+      <span>Tracker is online — accepting peer announcements on this host</span>
+      <a href="/peers?content_key=0000000000000000000000000000000000000000000000000000000000000000">Check API →</a>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  Built with <a href="https://github.com/dragonflyoss/client" target="_blank" rel="noopener">dragonflyoss/client</a> ·
+  <a href="https://github.com/JustDory/dragonfly-gguf-client" target="_blank" rel="noopener">dragonfly-gguf-client</a> ·
+  Tracker running on <a href="https://aws.amazon.com/ec2/" target="_blank" rel="noopener">AWS EC2 t4g.nano</a>
+</footer>
+
+</body>
+</html>
