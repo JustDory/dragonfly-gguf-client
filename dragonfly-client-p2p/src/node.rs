@@ -1,6 +1,6 @@
 use anyhow::Result;
-use iroh::{Endpoint, SecretKey};
 use iroh::endpoint::presets;
+use iroh::{Endpoint, SecretKey};
 use std::path::Path;
 
 pub struct IrohNode {
@@ -13,10 +13,7 @@ impl IrohNode {
             Some(path) => load_or_generate_secret_key(path).await?,
             None => SecretKey::generate(),
         };
-        let endpoint = Endpoint::builder(presets::N0)
-            .secret_key(sk)
-            .bind()
-            .await?;
+        let endpoint = Endpoint::builder(presets::N0).secret_key(sk).bind().await?;
         Ok(Self { endpoint })
     }
 

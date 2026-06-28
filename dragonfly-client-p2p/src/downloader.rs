@@ -15,7 +15,10 @@ pub async fn download_from_peers(
 ) -> Result<()> {
     let mut last_err = anyhow::anyhow!("no providers");
     for peer in providers {
-        tracing::debug!("trying provider {}", &peer.node_id[..8.min(peer.node_id.len())]);
+        tracing::debug!(
+            "trying provider {}",
+            &peer.node_id[..8.min(peer.node_id.len())]
+        );
         match tokio::time::timeout(
             timeout,
             try_download_from_peer(&node.endpoint, &peer, content_key, output),
@@ -24,11 +27,17 @@ pub async fn download_from_peers(
         {
             Ok(Ok(())) => return Ok(()),
             Ok(Err(e)) => {
-                tracing::warn!("provider {} failed: {e}", &peer.node_id[..8.min(peer.node_id.len())]);
+                tracing::warn!(
+                    "provider {} failed: {e}",
+                    &peer.node_id[..8.min(peer.node_id.len())]
+                );
                 last_err = e;
             }
             Err(_) => {
-                tracing::warn!("provider {} timed out", &peer.node_id[..8.min(peer.node_id.len())]);
+                tracing::warn!(
+                    "provider {} timed out",
+                    &peer.node_id[..8.min(peer.node_id.len())]
+                );
                 last_err = anyhow::anyhow!("timeout");
             }
         }
@@ -53,7 +62,8 @@ async fn try_download_from_peer(
     let (mut send, mut recv) = conn.open_bi().await?;
 
     let key_bytes = content_key.as_bytes();
-    send.write_all(&(key_bytes.len() as u32).to_le_bytes()).await?;
+    send.write_all(&(key_bytes.len() as u32).to_le_bytes())
+        .await?;
     send.write_all(key_bytes).await?;
     send.finish()?;
 
@@ -66,7 +76,10 @@ async fn try_download_from_peer(
     let mut len_buf = [0u8; 8];
     recv.read_exact(&mut len_buf).await?;
     let file_len = u64::from_le_bytes(len_buf);
-    tracing::info!("downloading {:.1} MiB via P2P", file_len as f64 / 1_048_576.0);
+    tracing::info!(
+        "downloading {:.1} MiB via P2P",
+        file_len as f64 / 1_048_576.0
+    );
 
     if let Some(parent) = output.parent() {
         tokio::fs::create_dir_all(parent).await?;

@@ -46,12 +46,7 @@ impl TrackerClient {
         Ok(body.providers)
     }
 
-    pub async fn announce(
-        &self,
-        content_key: &str,
-        node_id: &str,
-        addr_info: &str,
-    ) -> Result<()> {
+    pub async fn announce(&self, content_key: &str, node_id: &str, addr_info: &str) -> Result<()> {
         let url = format!("{}/announce", self.url);
         let body = serde_json::json!({
             "content_key": content_key,

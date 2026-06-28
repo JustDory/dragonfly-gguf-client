@@ -11,12 +11,20 @@ struct Args {
     #[arg(long, default_value = "0.0.0.0:8080", env = "TRACKER_BIND")]
     bind: SocketAddr,
 
-    #[arg(long, default_value_t = 1800, env = "TRACKER_TTL",
-          help = "Peer entry TTL in seconds")]
+    #[arg(
+        long,
+        default_value_t = 1800,
+        env = "TRACKER_TTL",
+        help = "Peer entry TTL in seconds"
+    )]
     ttl: u64,
 
-    #[arg(long, default_value_t = 10, env = "TRACKER_RATE_LIMIT",
-          help = "Max announce requests per IP per minute")]
+    #[arg(
+        long,
+        default_value_t = 10,
+        env = "TRACKER_RATE_LIMIT",
+        help = "Max announce requests per IP per minute"
+    )]
     rate_limit: u32,
 }
 

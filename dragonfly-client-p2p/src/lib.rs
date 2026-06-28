@@ -45,9 +45,10 @@ pub async fn try_p2p_download(
     timeout: Duration,
 ) -> Result<()> {
     let tracker = TrackerClient::new(tracker_url.to_string());
-    let peers = tracker.get_peers(content_key).await.map_err(|e| {
-        anyhow::anyhow!("tracker query failed: {e}")
-    })?;
+    let peers = tracker
+        .get_peers(content_key)
+        .await
+        .map_err(|e| anyhow::anyhow!("tracker query failed: {e}"))?;
 
     if peers.is_empty() {
         return Err(anyhow::anyhow!("no P2P providers"));
@@ -64,7 +65,6 @@ pub async fn try_p2p_download(
     node.close().await;
     result
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -97,7 +97,11 @@ mod tests {
     #[test]
     fn test_content_key_base_url_matters() {
         // The same path on two different mirrors must not collide.
-        let k1 = content_key("gguf://owner/repo/model.gguf", "main", Some("https://hf.co"));
+        let k1 = content_key(
+            "gguf://owner/repo/model.gguf",
+            "main",
+            Some("https://hf.co"),
+        );
         let k2 = content_key(
             "gguf://owner/repo/model.gguf",
             "main",
@@ -118,7 +122,10 @@ mod tests {
         // Verify the input string is "hf://...:main", not "|hf://...:main".
         let k_no_base = content_key("hf://owner/repo/model.gguf", "main", None);
         let k_pipe = hex::encode(sha2::Sha256::digest(b"|hf://owner/repo/model.gguf:main"));
-        assert_ne!(k_no_base, k_pipe, "content_key must not include a spurious leading pipe");
+        assert_ne!(
+            k_no_base, k_pipe,
+            "content_key must not include a spurious leading pipe"
+        );
         let expected = hex::encode(sha2::Sha256::digest(b"hf://owner/repo/model.gguf:main"));
         assert_eq!(k_no_base, expected);
     }
