@@ -139,7 +139,8 @@ async fn dial_peer(
     let (mut send, mut recv) = conn.open_bi().await?;
 
     let key_bytes = content_key.as_bytes();
-    send.write_all(&(key_bytes.len() as u32).to_le_bytes()).await?;
+    send.write_all(&(key_bytes.len() as u32).to_le_bytes())
+        .await?;
     send.write_all(key_bytes).await?;
     send.finish()?;
 
@@ -189,19 +190,15 @@ async fn download_body(mut ready: ReadyPeer, output: &Path, timeout: Duration) -
         .open(output)
         .await?;
 
-    let copied = match tokio::time::timeout(
-        timeout,
-        tokio::io::copy(&mut ready.recv, &mut file),
-    )
-    .await
-    {
-        Ok(result) => result?,
-        Err(_) => {
-            drop(file);
-            let _ = tokio::fs::remove_file(output).await;
-            return Err(anyhow::anyhow!("P2P body transfer timed out"));
-        }
-    };
+    let copied =
+        match tokio::time::timeout(timeout, tokio::io::copy(&mut ready.recv, &mut file)).await {
+            Ok(result) => result?,
+            Err(_) => {
+                drop(file);
+                let _ = tokio::fs::remove_file(output).await;
+                return Err(anyhow::anyhow!("P2P body transfer timed out"));
+            }
+        };
     file.flush().await?;
 
     if copied != ready.file_len {
