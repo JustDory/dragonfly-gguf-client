@@ -24,81 +24,30 @@ peer-to-peer delivery mechanisms for GGUF models:
 | Setup | Manager + scheduler + peers | Just `--p2p-tracker <url>` |
 | Discovery | Dragonfly scheduler | Lightweight HTTP tracker |
 
-```shell
-# Dragonfly P2P (requires a running cluster)
-dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf -O ./model.gguf
+## 🚀 Quickstart
 
-# Iroh P2P — community tracker is live, works from any network, no signup
-dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf \
-  -O ./model.gguf --p2p-tracker https://tracker.dragonfly-gguf.dev
-```
-
-> **🌐 Community tracker is live** — [`tracker.dragonfly-gguf.dev`](https://tracker.dragonfly-gguf.dev) hosts a public model registry and P2P peer discovery endpoint. Browse the top 50 GGUF models, check live availability, and grab ready-to-run `dfget` commands. Point any `dfget` call at `--p2p-tracker https://tracker.dragonfly-gguf.dev` to join the swarm.
-
-## 🐳 Docker Quickstart
-
-No Rust toolchain needed. Three ways to get started, in order of complexity:
-
-### 1 — Pre-built binary (Linux x86\_64, zero setup)
-
-No Rust, no Docker — download and run:
+Pull a GGUF model from the community P2P swarm — no Rust, no Docker, no signup. Download the
+prebuilt `dfget` binary and run it:
 
 ```shell
-# Download dfget
+# Download dfget (Linux x86_64)
 curl -fsSL -o dfget \
   https://github.com/JustDory/dragonfly-gguf-client/releases/download/v0.1.0-tracker/dfget-x86_64-linux
 chmod +x dfget
 
-# Pull a model from the community swarm
+# Pull a model — dfget discovers peers via the community tracker (the default),
+# downloads from one over Iroh P2P, and falls back to Hugging Face if none are found.
 ./dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf \
-  -O ./model.gguf \
-  --p2p-tracker https://tracker.dragonfly-gguf.dev
+  -O ./model.gguf
 ```
 
-> Requires Linux x86\_64 with glibc 2.35+ (Ubuntu 22.04+, Debian 12+, Fedora 36+).
-> macOS / Windows / older distros → see [Docker](#2--run-your-own-tracker) or [Build from source](#build-from-source).
+> **🌐 Community tracker is live** — [`tracker.dragonfly-gguf.dev`](https://tracker.dragonfly-gguf.dev)
+> is the built-in default, so the command above joins the swarm with no extra flags. It also hosts a
+> public model registry: browse the top 50 GGUF models, check live availability, and grab ready-to-run
+> `dfget` commands.
 
-### 2 — Run your own tracker
-
-```shell
-# Pull and start the tracker on port 8080
-docker run -d --name dragonfly-tracker \
-  -p 8080:8080 \
-  --restart unless-stopped \
-  ghcr.io/justdory/dragonfly-gguf-client/tracker:latest
-
-# Verify it's healthy
-curl http://localhost:8080/peers?content_key=0000000000000000000000000000000000000000000000000000000000000000
-# → {"providers":[]}
-```
-
-### 3 — Full seeder stack (tracker + dfdaemon seed peer)
-
-Spins up the tracker, a Dragonfly seed daemon, and the required control-plane services (manager, scheduler, Redis, MySQL) in one command:
-
-```shell
-git clone https://github.com/JustDory/dragonfly-gguf-client.git
-cd dragonfly-gguf-client/deploy/tracker
-
-docker compose up -d
-
-# Watch services come up (~30 s for control plane to be healthy)
-docker compose ps
-
-# Download a model through the local P2P stack
-dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf \
-  -O ./model.gguf \
-  --p2p-tracker http://localhost:8080
-
-# Check tracker peers after the download — your seeder should appear
-curl http://localhost:8080/peers?content_key=$(
-  echo -n "hf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf:main" \
-  | sha256sum | awk '{print $1}')
-```
-
-> **Note:** the first `docker compose up` builds the seeder image from source — this takes a few minutes. Subsequent starts are instant.
-
----
+> Prebuilt binary requires Linux x86\_64 with glibc 2.35+ (Ubuntu 22.04+, Debian 12+, Fedora 36+).
+> On macOS / Windows / older distros → [build from source](#build-from-source).
 
 ## ✨ Features
 
@@ -184,9 +133,30 @@ flowchart TD
 **Content key** = `sha256_hex("hf://owner/repo/model.gguf:revision")` — stable and identical across
 all peers for the same model and revision.
 
-## 🚀 Installation
+## 📦 Installation
 
-### Prerequisites
+Two ways to get the binaries, least effort first.
+
+### Prebuilt binary (Linux x86_64)
+
+The fastest path — used by the [Quickstart](#-quickstart) above. Download `dfget` (and, if you want
+to run discovery, `dragonfly-tracker`) from the
+[Releases page](https://github.com/JustDory/dragonfly-gguf-client/releases):
+
+```shell
+curl -fsSL -o dfget \
+  https://github.com/JustDory/dragonfly-gguf-client/releases/download/v0.1.0-tracker/dfget-x86_64-linux
+chmod +x dfget
+```
+
+> Requires Linux x86\_64 with glibc 2.35+ (Ubuntu 22.04+, Debian 12+, Fedora 36+).
+> macOS / Windows / older distros need a [source build](#build-from-source).
+
+### Build from source
+
+Building gives you every binary (`dfget`, `dfdaemon`, `dragonfly-tracker`) on any supported platform.
+
+**Prerequisites:**
 
 - A Linux environment (native Linux or WSL2). The workspace depends on Linux-only crates
   (unix sockets, `fuse`), so it does **not** build on native Windows.
@@ -205,7 +175,7 @@ all peers for the same model and revision.
   > `LIBCLANG_PATH`), and point bindgen at your GCC headers via
   > `BINDGEN_EXTRA_CLANG_ARGS="-I/usr/lib/gcc/x86_64-linux-gnu/<ver>/include"`.
 
-### Build from source
+**Build:**
 
 ```shell
 git clone https://github.com/JustDory/dragonfly-gguf-client.git
@@ -222,39 +192,37 @@ cargo build --release
 cargo build --release --bin dfget
 ```
 
-Run the tests:
+**Run the tests:**
 
 ```shell
 cargo test -p dragonfly-client-backend gguf   # gguf backend unit tests
 cargo test -p dragonfly-client-p2p            # P2P layer unit tests + loopback
 ```
 
-## 📦 Usage
+## 🛠️ Usage
 
-### Dragonfly P2P
+The three things you can do, by intent: **pull** a model, **run a tracker** for peer discovery, or
+**run a seeder** to share models back to the swarm.
+
+### Pull a model
 
 ```shell
 dfget gguf://owner/repo/model.gguf -O ./model.gguf
 ```
 
-Requires a running `dfdaemon` with a Dragonfly scheduler and manager. See
-[Testing peer-to-peer locally](#-testing-peer-to-peer-locally).
-
-### Iroh P2P (permissionless)
+`dfget` checks the tracker for peers, downloads from the first available one over Iroh, and verifies
+the result against the source sha256. With no peers (or `--no-p2p`) it falls back to the Dragonfly
+scheduler, then to Hugging Face directly. The default tracker is the community instance, so no flag
+is needed; point at your own with `--p2p-tracker`:
 
 ```shell
 dfget gguf://owner/repo/model.gguf -O ./model.gguf \
   --p2p-tracker http://your-tracker:8080
 ```
 
-For discovery and download, no cluster is needed: `dfget` checks the tracker for peers, downloads
-from the first available one, and verifies the sha256.
-
-**Seeding** (sharing what you downloaded back to the swarm) is handled by `dfdaemon`, not `dfget` —
-`dfget` is a short-lived command and can't keep an Iroh endpoint alive after it exits. Instead it
-writes a small *seed manifest* to a shared registry directory, and a `dfdaemon` running with seeding
-enabled hosts one persistent Iroh endpoint that serves every registered file until its manifest
-expires. See [Enabling seeding](#enabling-seeding-dfdaemon).
+> **Cluster mode:** running against a Dragonfly cluster instead of (or alongside) Iroh needs a
+> `dfdaemon` with a scheduler and manager. See [Run a seeder](#run-a-seeder) and
+> [Testing locally](#-testing-locally).
 
 **All `--p2p-*` flags:**
 
@@ -269,7 +237,59 @@ expires. See [Enabling seeding](#enabling-seeding-dfdaemon).
 Hugging Face options also apply: `--hf-token` (private repos), `--hf-revision` (pin a revision),
 `--hf-base-url` (mirror).
 
-### Seeding (dfdaemon)
+### Run a tracker
+
+The `dragonfly-tracker` binary is a lightweight HTTP peer-discovery service. Run one anywhere with a
+public IP (or behind a reverse proxy). Fastest with the prebuilt image:
+
+```shell
+# Pull and start the standalone tracker on port 8080
+docker run -d --name dragonfly-tracker \
+  -p 8080:8080 \
+  --restart unless-stopped \
+  ghcr.io/justdory/dragonfly-gguf-client/tracker:latest
+
+# Verify it's healthy
+curl http://localhost:8080/peers?content_key=0000000000000000000000000000000000000000000000000000000000000000
+# → {"providers":[]}
+```
+
+Or run the binary directly (from a [source build](#build-from-source)):
+
+```shell
+./target/release/dragonfly-tracker --bind 0.0.0.0:8080
+
+# Options
+./target/release/dragonfly-tracker --help
+# --bind <addr>         Listen address (default: 0.0.0.0:8080)
+# --ttl <secs>          Peer TTL before eviction (default: 1800)
+# --rate-limit <n>      Max announces per IP per minute (default: 10)
+
+# Or build the tracker image yourself (build context is the repo root)
+docker build -f deploy/tracker/Dockerfile -t dragonfly-tracker .
+docker run -p 8080:8080 dragonfly-tracker
+```
+
+**Tracker API:**
+
+```
+POST /announce
+  Body: { "content_key": "<64-char hex>", "node_id": "<iroh node id>", "addr_info": "<json>" }
+
+GET /peers?content_key=<64-char hex>
+  Response: { "providers": [{ "node_id": "...", "addr_info": "...", "last_seen": <unix ts> }] }
+
+DELETE /leave
+  Body: { "content_key": "...", "node_id": "..." }
+```
+
+### Run a seeder
+
+Seeding shares the models you've downloaded back to the swarm. It is handled by `dfdaemon`, not
+`dfget` — `dfget` is a short-lived command and can't keep an Iroh endpoint alive after it exits.
+Instead it writes a small *seed manifest* to a shared registry directory, and a `dfdaemon` running
+with seeding enabled hosts one persistent Iroh endpoint that serves every registered file until its
+manifest expires.
 
 Seeding is **on by default**. A running `dfdaemon` watches the seed registry
 (`$XDG_DATA_HOME/dragonfly/gguf-seeds`, override with `DRAGONFLY_GGUF_SEED_REGISTRY`) and seeds every
@@ -291,53 +311,41 @@ daemon resumes serving every manifest that hasn't expired. When a manifest expir
 file is deleted), the daemon de-announces it from the tracker and removes the manifest, so peers are
 never handed a node that's about to disappear.
 
+**One-command full stack.** To bring up a tracker, a Dragonfly seed daemon, and the required
+control-plane services (manager, scheduler, Redis, MySQL) together:
+
+```shell
+git clone https://github.com/JustDory/dragonfly-gguf-client.git
+cd dragonfly-gguf-client/deploy/tracker
+
+docker compose up -d
+
+# Watch services come up (~30 s for control plane to be healthy)
+docker compose ps
+
+# Download a model through the local P2P stack
+dfget gguf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf \
+  -O ./model.gguf \
+  --p2p-tracker http://localhost:8080
+
+# Check tracker peers after the download — your seeder should appear
+curl http://localhost:8080/peers?content_key=$(
+  echo -n "hf://bartowski/Qwen2-0.5B-Instruct-GGUF/Qwen2-0.5B-Instruct-Q4_K_M.gguf:main" \
+  | sha256sum | awk '{print $1}')
+```
+
+> **Note:** the first `docker compose up` builds the seeder image from source — this takes a few
+> minutes. Subsequent starts are instant.
+
 ### Fallback order
 
-1. Iroh P2P — if `--p2p-tracker` is set and peers are found
+1. Iroh P2P — if `--p2p-tracker` is set (it is, by default) and peers are found
 2. Dragonfly scheduler — if `--no-p2p` / `--prefer-dragonfly`, or no Iroh peers available
 3. Hugging Face direct — if the Dragonfly scheduler is unreachable (existing fallback, unchanged)
 
-## 🔭 Running the tracker
+## 🌐 Testing locally
 
-The `dragonfly-tracker` binary is a lightweight HTTP peer-discovery service. Run one anywhere with
-a public IP (or behind a reverse proxy):
-
-```shell
-# Start on port 8080
-./target/release/dragonfly-tracker --bind 0.0.0.0:8080
-
-# Options
-./target/release/dragonfly-tracker --help
-# --bind <addr>         Listen address (default: 0.0.0.0:8080)
-# --ttl <secs>          Peer TTL before eviction (default: 1800)
-# --rate-limit <n>      Max announces per IP per minute (default: 10)
-```
-
-**Using Docker:**
-
-```shell
-cd deploy/tracker
-docker compose up -d
-
-# Or build and run manually
-docker build -t dragonfly-tracker .
-docker run -p 8080:8080 dragonfly-tracker
-```
-
-**Tracker API:**
-
-```
-POST /announce
-  Body: { "content_key": "<64-char hex>", "node_id": "<iroh node id>", "addr_info": "<json>" }
-
-GET /peers?content_key=<64-char hex>
-  Response: { "providers": [{ "node_id": "...", "addr_info": "...", "last_seen": <unix ts> }] }
-
-DELETE /leave
-  Body: { "content_key": "...", "node_id": "..." }
-```
-
-## 🌐 Testing Iroh P2P locally
+### Iroh P2P
 
 ```shell
 # 1. Start the tracker
@@ -373,9 +381,9 @@ hole-punching will usually establish a direct path after that.
 dfget gguf://... -O ./model.gguf --no-p2p
 ```
 
-## 🌐 Testing Dragonfly P2P locally
+### Dragonfly P2P
 
-A full P2P run needs a Dragonfly **manager**, **scheduler**, and at least one **peer**. The easiest
+A full Dragonfly run needs a **manager**, **scheduler**, and at least one **peer**. The easiest
 way is the official compose stack in
 [dragonflyoss/dragonfly](https://github.com/dragonflyoss/dragonfly/tree/main/deploy/docker-compose),
 with this fork's client image substituted for the peers.
