@@ -16,7 +16,6 @@
 
 use bytesize::ByteSize;
 use clap::Parser;
-use dragonfly_client_p2p as p2p;
 use dragonfly_api::common::v2::{Download, Hdfs, HuggingFace, ModelScope, ObjectStorage, TaskType};
 use dragonfly_api::dfdaemon::v2::{
     download_task_response, DownloadTaskRequest, ListTaskEntriesRequest,
@@ -32,6 +31,7 @@ use dragonfly_client_config::VersionValueParser;
 use dragonfly_client_config::{self, dfdaemon, dfget};
 use dragonfly_client_core::error::{ErrorType, OrErr};
 use dragonfly_client_core::{Error, Result};
+use dragonfly_client_p2p as p2p;
 use dragonfly_client_util::net::preferred_local_ip;
 use dragonfly_client_util::{
     fs::fallocate, http::header_vec_to_hashmap,
@@ -1132,8 +1132,12 @@ async fn download(
         let output_clone = args.output.clone();
         let seed_time = args.seed_time;
         let keypair_path = args.iroh_keypair.clone().or_else(|| {
-            std::env::var_os("HOME")
-                .map(|h| PathBuf::from(h).join(".config").join("dragonfly").join("iroh.key"))
+            std::env::var_os("HOME").map(|h| {
+                PathBuf::from(h)
+                    .join(".config")
+                    .join("dragonfly")
+                    .join("iroh.key")
+            })
         });
 
         match p2p::try_p2p_download(
@@ -1345,10 +1349,7 @@ async fn download(
                         }
 
                         downloaded += piece.length;
-                        let position = min(
-                            downloaded,
-                            progress_bar.length().unwrap_or(0),
-                        );
+                        let position = min(downloaded, progress_bar.length().unwrap_or(0));
                         progress_bar.set_position(position);
                     }
                     None => {
@@ -1392,9 +1393,11 @@ async fn download(
     if let Some(verification) = gguf_verification {
         if let Err(err) = verify_downloaded_gguf(&verification).await {
             error!("gguf integrity check failed: {}", err);
-            fs::remove_file(&verification.output).await.inspect_err(|e| {
-                error!("remove file {:?} failed: {}", verification.output, e);
-            })?;
+            fs::remove_file(&verification.output)
+                .await
+                .inspect_err(|e| {
+                    error!("remove file {:?} failed: {}", verification.output, e);
+                })?;
 
             return Err(err);
         }

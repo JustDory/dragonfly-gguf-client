@@ -9,8 +9,13 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let a: Vec<String> = std::env::args().collect();
-    let (tracker, url, revision, file, registry) =
-        (&a[1], &a[2], &a[3], PathBuf::from(&a[4]), PathBuf::from(&a[5]));
+    let (tracker, url, revision, file, registry) = (
+        &a[1],
+        &a[2],
+        &a[3],
+        PathBuf::from(&a[4]),
+        PathBuf::from(&a[5]),
+    );
 
     let key = p2p::content_key(url, revision, None);
     p2p::register_seed(&registry, tracker, &key, &file, Duration::from_secs(600))?;

@@ -129,9 +129,7 @@ fn now_unix() -> u64 {
 pub fn default_registry_dir() -> PathBuf {
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share"))
-        })
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share")))
         .unwrap_or_else(|| PathBuf::from("/tmp"));
     base.join("dragonfly").join("gguf-seeds")
 }
@@ -217,7 +215,12 @@ pub async fn run_seed_service(
     let node_id = endpoint.id().to_string();
     let addr_info = serde_json::to_string(&endpoint.addr()).unwrap_or_default();
     let router = Router::builder(endpoint)
-        .accept(ALPN, Arc::new(GgufProvider { files: files.clone() }))
+        .accept(
+            ALPN,
+            Arc::new(GgufProvider {
+                files: files.clone(),
+            }),
+        )
         .spawn();
 
     tracing::info!(
@@ -298,7 +301,10 @@ async fn reconcile(
         match active.get_mut(&manifest.content_key) {
             None => {
                 let tracker = tracker_for(trackers, &manifest.tracker_url);
-                match tracker.announce(&manifest.content_key, node_id, addr_info).await {
+                match tracker
+                    .announce(&manifest.content_key, node_id, addr_info)
+                    .await
+                {
                     Ok(()) => {
                         tracing::info!(
                             "seeding {} ({:?})",
@@ -322,8 +328,9 @@ async fn reconcile(
             Some(seed) => {
                 if seed.last_announce.elapsed() >= REANNOUNCE_INTERVAL {
                     let tracker = tracker_for(trackers, &manifest.tracker_url);
-                    if let Err(e) =
-                        tracker.announce(&manifest.content_key, node_id, addr_info).await
+                    if let Err(e) = tracker
+                        .announce(&manifest.content_key, node_id, addr_info)
+                        .await
                     {
                         tracing::warn!(
                             "re-announce failed for {}: {e}",

@@ -442,8 +442,8 @@ async fn main() -> Result<(), anyhow::Error> {
     // The gguf P2P seed service is on by default: dfdaemon hosts a persistent
     // Iroh endpoint that seeds every file dfget registers in the shared registry
     // directory. Opt out with `--no-gguf-seed` or `DRAGONFLY_GGUF_SEED=0`.
-    let gguf_seeding_disabled = args.no_gguf_seed
-        || std::env::var_os("DRAGONFLY_GGUF_SEED").is_some_and(|v| v == "0");
+    let gguf_seeding_disabled =
+        args.no_gguf_seed || std::env::var_os("DRAGONFLY_GGUF_SEED").is_some_and(|v| v == "0");
     let gguf_seed_registry: Option<PathBuf> = if gguf_seeding_disabled {
         info!("gguf P2P seeding disabled");
         None

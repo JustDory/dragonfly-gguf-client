@@ -59,7 +59,11 @@ impl PeerStore {
     pub fn get_peers(&self, content_key: &str) -> Vec<PeerEntry> {
         let cutoff = now_secs().saturating_sub(self.ttl_secs);
         match self.data.get(content_key) {
-            Some(peers) => peers.iter().filter(|p| p.last_seen >= cutoff).cloned().collect(),
+            Some(peers) => peers
+                .iter()
+                .filter(|p| p.last_seen >= cutoff)
+                .cloned()
+                .collect(),
             None => vec![],
         }
     }

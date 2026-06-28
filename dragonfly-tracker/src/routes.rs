@@ -121,16 +121,18 @@ async fn handle_peers(
     query: PeersQuery,
     store: Arc<PeerStore>,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-    if query.content_key.len() != 64
-        || !query.content_key.bytes().all(|b| b.is_ascii_hexdigit())
-    {
+    if query.content_key.len() != 64 || !query.content_key.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Ok(warp::reply::with_status(
             warp::reply::json(&serde_json::json!({"error": "invalid content_key"})),
             warp::http::StatusCode::BAD_REQUEST,
         ));
     }
     let providers = store.get_peers(&query.content_key);
-    tracing::debug!("returning {} providers for key {}", providers.len(), &query.content_key[..8.min(query.content_key.len())]);
+    tracing::debug!(
+        "returning {} providers for key {}",
+        providers.len(),
+        &query.content_key[..8.min(query.content_key.len())]
+    );
     Ok(warp::reply::with_status(
         warp::reply::json(&PeersResponse { providers }),
         warp::http::StatusCode::OK,
