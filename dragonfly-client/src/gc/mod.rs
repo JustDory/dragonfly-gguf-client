@@ -173,7 +173,7 @@ impl GC {
     #[instrument(skip_all)]
     async fn evict_task_space(&self, need_evict_space: u64) -> Result<()> {
         let mut tasks = self.storage.get_tasks()?;
-        tasks.sort_by(|a, b| a.updated_at.cmp(&b.updated_at));
+        tasks.sort_by_key(|a| a.updated_at);
 
         let mut evicted_space = 0;
         for task in tasks {
@@ -342,7 +342,7 @@ impl GC {
     #[instrument(skip_all)]
     async fn evict_persistent_task_space(&self, need_evict_space: u64) -> Result<()> {
         let mut tasks = self.storage.get_persistent_tasks()?;
-        tasks.sort_by(|a, b| a.updated_at.cmp(&b.updated_at));
+        tasks.sort_by_key(|a| a.updated_at);
 
         let mut evicted_space = 0;
         for task in tasks {
@@ -387,7 +387,7 @@ impl GC {
     #[instrument(skip_all)]
     async fn evict_persistent_cache_task_space(&self, need_evict_space: u64) -> Result<()> {
         let mut tasks = self.storage.get_persistent_cache_tasks()?;
-        tasks.sort_by(|a, b| a.updated_at.cmp(&b.updated_at));
+        tasks.sort_by_key(|a| a.updated_at);
 
         let mut evicted_space = 0;
         for task in tasks {

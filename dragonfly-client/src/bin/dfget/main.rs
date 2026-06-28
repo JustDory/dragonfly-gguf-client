@@ -1045,7 +1045,7 @@ async fn get_all_entries(
     // Sort directories before files to ensure parent directories exist
     // before attempting to create their children.
     let mut sorted_entries = Vec::from_iter(entries);
-    sorted_entries.sort_unstable_by(|a, b| b.is_dir.cmp(&a.is_dir));
+    sorted_entries.sort_unstable_by_key(|b| std::cmp::Reverse(b.is_dir));
     info!("get all entries: {:?}", sorted_entries);
 
     Ok(sorted_entries)
