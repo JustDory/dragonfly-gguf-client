@@ -72,10 +72,11 @@ API in `lib.rs`: `content_key()`, `try_p2p_download()`, `register_seed()`, `run_
 - **Content key** = `sha256_hex("hf://owner/repo/path:revision[:base_url]")` — stable and identical
   across peers for the same source object. Path is **not** lowercased (HF blobs are case-sensitive);
   `base_url` is folded in so mirrors don't collide. See `content_key()` tests for the invariants.
-- **`dfget` download path** (`dragonfly-client/src/bin/dfget/main.rs`): for a `gguf://` URL with P2P
-  enabled it computes the content key, queries the tracker, and downloads over Iroh
-  (`try_p2p_download`). On any successful download it calls `register_gguf_seed()` to write a
-  **seed manifest** into the registry dir — `dfget` is short-lived and cannot hold an Iroh endpoint open.
+- **`dfget` download path** (`dragonfly-client/src/bin/dfget/main.rs`): for a `gguf://` **or `hf://`**
+  URL with P2P enabled it computes the content key, queries the tracker, and downloads over Iroh
+  (`try_p2p_download`) — so every Hugging Face file format shares the P2P path, not just GGUF.
+  On any successful download it calls `register_p2p_seed()` to write a **seed manifest** into the
+  registry dir — `dfget` is short-lived and cannot hold an Iroh endpoint open.
 - **Seeding** (`dragonfly-client/src/bin/dfdaemon/main.rs`): a long-running `dfdaemon` runs
   `run_seed_service()` over the registry dir (`$XDG_DATA_HOME/dragonfly/gguf-seeds`, override
   `DRAGONFLY_GGUF_SEED_REGISTRY`), hosting one persistent Iroh endpoint that serves every unexpired
@@ -98,9 +99,9 @@ per-IP announce rate limiting. Default community instance: `https://tracker.drag
 2. **Dragonfly scheduler** — when `--no-p2p`/`--prefer-dragonfly`, or no Iroh peers.
 3. **Hugging Face direct** — upstream fallback when the scheduler is unreachable.
 
-After a `gguf://` download, `dfget` verifies the file against the source `sha256` from the Hugging Face
-LFS `X-Linked-Etag` (best-effort: skipped if none advertised, fails only on a confirmed mismatch),
-deleting the file on mismatch.
+After a `gguf://` or `hf://` download, `dfget` verifies the file against the source `sha256` from the
+Hugging Face LFS `X-Linked-Etag` (best-effort: skipped if none advertised — e.g. small non-LFS config
+files — fails only on a confirmed mismatch), deleting the file on mismatch.
 
 ## Deploy
 
