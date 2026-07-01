@@ -10,6 +10,14 @@ struct AnnounceBody {
     content_key: String,
     node_id: String,
     addr_info: String,
+    /// Optional content metadata (filename, format, size). Pre-metadata
+    /// clients simply omit these; the tracker treats the key as anonymous.
+    #[serde(default)]
+    filename: Option<String>,
+    #[serde(default)]
+    format: Option<String>,
+    #[serde(default)]
+    size: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -28,6 +36,25 @@ struct PeersResponse {
     providers: Vec<crate::store::PeerEntry>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ContentsQuery {
+    /// Case-insensitive exact match on the announced format (e.g. "gguf",
+    /// "safetensors") — the "category" filter for registry UIs.
+    format: Option<String>,
+    /// Case-insensitive substring search on the announced filename.
+    q: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct ContentsResponse {
+    contents: Vec<crate::store::ContentSummary>,
+}
+
+/// Default and hard cap for `GET /contents` page size.
+const DEFAULT_CONTENTS_LIMIT: usize = 100;
+const MAX_CONTENTS_LIMIT: usize = 500;
+
 /// Upper bound on a serialized Iroh `EndpointAddr` we are willing to store. Real
 /// records are well under 1 KiB; this keeps a misbehaving client from bloating
 /// the in-memory store with huge announcements.
@@ -35,6 +62,12 @@ const MAX_ADDR_INFO_LEN: usize = 8 * 1024;
 
 /// Upper bound on an Iroh node id (a base32-encoded ed25519 key is ~52 chars).
 const MAX_NODE_ID_LEN: usize = 128;
+
+/// Upper bounds on announced content metadata. Filenames on every mainstream
+/// filesystem cap at 255 bytes; formats are short extensions. These keep a
+/// misbehaving client from bloating the in-memory metadata map.
+const MAX_FILENAME_LEN: usize = 512;
+const MAX_FORMAT_LEN: usize = 32;
 
 /// Validates an announce body before it is stored: the content key must be a
 /// 64-char hex sha256, the node id must be a sane non-empty string, and addr_info
@@ -49,6 +82,35 @@ fn valid_announce(body: &AnnounceBody) -> bool {
         && !body.addr_info.is_empty()
         && body.addr_info.len() <= MAX_ADDR_INFO_LEN
         && serde_json::from_str::<serde_json::Value>(&body.addr_info).is_ok()
+        && valid_meta(body)
+}
+
+/// Validates the optional metadata fields: when present they must be
+/// non-empty, bounded, and free of control characters (they are echoed back
+/// verbatim by `GET /contents`, so keep what we store display-safe).
+fn valid_meta(body: &AnnounceBody) -> bool {
+    let ok_str =
+        |s: &str, max: usize| !s.is_empty() && s.len() <= max && !s.chars().any(|c| c.is_control());
+    body.filename
+        .as_deref()
+        .is_none_or(|f| ok_str(f, MAX_FILENAME_LEN))
+        && body
+            .format
+            .as_deref()
+            .is_none_or(|f| ok_str(f, MAX_FORMAT_LEN))
+}
+
+/// Extracts the optional content metadata from an announce body, if any field
+/// was supplied.
+fn announce_meta(body: &AnnounceBody) -> Option<crate::store::ContentMeta> {
+    if body.filename.is_none() && body.format.is_none() && body.size.is_none() {
+        return None;
+    }
+    Some(crate::store::ContentMeta {
+        filename: body.filename.clone(),
+        format: body.format.clone(),
+        size: body.size,
+    })
 }
 
 fn with_store(
@@ -82,7 +144,14 @@ pub fn routes(
         .and(with_store(store.clone()))
         .and_then(handle_leave);
 
-    announce.or(peers).or(leave)
+    let contents = warp::get()
+        .and(warp::path("contents"))
+        .and(warp::path::end())
+        .and(warp::query::<ContentsQuery>())
+        .and(with_store(store.clone()))
+        .and_then(handle_contents);
+
+    announce.or(peers).or(leave).or(contents)
 }
 
 async fn handle_announce(
@@ -108,7 +177,8 @@ async fn handle_announce(
         ));
     }
 
-    store.announce(body.content_key, body.node_id, body.addr_info);
+    let meta = announce_meta(&body);
+    store.announce(body.content_key, body.node_id, body.addr_info, meta);
     tracing::debug!("announced peer");
 
     Ok(warp::reply::with_status(
@@ -150,6 +220,22 @@ async fn handle_leave(
     ))
 }
 
+async fn handle_contents(
+    query: ContentsQuery,
+    store: Arc<PeerStore>,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_CONTENTS_LIMIT)
+        .min(MAX_CONTENTS_LIMIT);
+    let contents = store.list_contents(query.format.as_deref(), query.q.as_deref(), limit);
+    tracing::debug!("returning {} contents", contents.len());
+    Ok(warp::reply::with_status(
+        warp::reply::json(&ContentsResponse { contents }),
+        warp::http::StatusCode::OK,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,6 +245,9 @@ mod tests {
             content_key: key.to_string(),
             node_id: node.to_string(),
             addr_info: addr.to_string(),
+            filename: None,
+            format: None,
+            size: None,
         }
     }
 
@@ -184,6 +273,47 @@ mod tests {
         assert!(!valid_announce(&body(&"a".repeat(64), "node", "not json")));
         let huge = format!("\"{}\"", "x".repeat(MAX_ADDR_INFO_LEN));
         assert!(!valid_announce(&body(&"a".repeat(64), "node", &huge)));
+    }
+
+    #[test]
+    fn accepts_announce_with_metadata() {
+        let mut b = body(&"a".repeat(64), "node-1", "{}");
+        b.filename = Some("model.safetensors".to_string());
+        b.format = Some("safetensors".to_string());
+        b.size = Some(1234);
+        assert!(valid_announce(&b));
+        let meta = announce_meta(&b).unwrap();
+        assert_eq!(meta.filename.as_deref(), Some("model.safetensors"));
+        assert_eq!(meta.format.as_deref(), Some("safetensors"));
+        assert_eq!(meta.size, Some(1234));
+    }
+
+    #[test]
+    fn rejects_malformed_metadata() {
+        // Empty strings, oversized values, and control characters are refused;
+        // fully absent metadata stays valid (pre-metadata clients).
+        let mut b = body(&"a".repeat(64), "node-1", "{}");
+        b.filename = Some(String::new());
+        assert!(!valid_announce(&b));
+
+        b.filename = Some("f".repeat(MAX_FILENAME_LEN + 1));
+        assert!(!valid_announce(&b));
+
+        b.filename = Some("evil\nname.gguf".to_string());
+        assert!(!valid_announce(&b));
+
+        b.filename = None;
+        b.format = Some("f".repeat(MAX_FORMAT_LEN + 1));
+        assert!(!valid_announce(&b));
+
+        b.format = None;
+        assert!(valid_announce(&b));
+        assert!(announce_meta(&b).is_none());
+
+        // Size alone is enough to carry metadata.
+        b.size = Some(7);
+        assert!(valid_announce(&b));
+        assert!(announce_meta(&b).is_some());
     }
 
     #[test]

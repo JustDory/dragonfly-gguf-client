@@ -298,11 +298,16 @@ async fn reconcile(
 
         files.insert(manifest.content_key.clone(), manifest.file_path.clone());
 
+        // Announce with content metadata derived from the seeded file, so the
+        // tracker can list what is actually available in the swarm (content
+        // keys alone are one-way hashes).
+        let meta = crate::tracker::FileMeta::from_path(&manifest.file_path);
+
         match active.get_mut(&manifest.content_key) {
             None => {
                 let tracker = tracker_for(trackers, &manifest.tracker_url);
                 match tracker
-                    .announce(&manifest.content_key, node_id, addr_info)
+                    .announce_with_meta(&manifest.content_key, node_id, addr_info, Some(&meta))
                     .await
                 {
                     Ok(()) => {
@@ -329,7 +334,7 @@ async fn reconcile(
                 if seed.last_announce.elapsed() >= REANNOUNCE_INTERVAL {
                     let tracker = tracker_for(trackers, &manifest.tracker_url);
                     if let Err(e) = tracker
-                        .announce(&manifest.content_key, node_id, addr_info)
+                        .announce_with_meta(&manifest.content_key, node_id, addr_info, Some(&meta))
                         .await
                     {
                         tracing::warn!(
