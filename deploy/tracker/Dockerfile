@@ -1,4 +1,5 @@
-FROM rust:1.88 AS builder
+# Keep in sync with ci/Dockerfile (workspace needs rustc >= 1.91 for iroh).
+FROM rust:1.96 AS builder
 WORKDIR /build
 
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
