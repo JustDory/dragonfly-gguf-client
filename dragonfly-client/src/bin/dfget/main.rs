@@ -447,7 +447,7 @@ struct Args {
         long,
         default_value_t = false,
         env = "DRAGONFLY_PREFER_DRAGONFLY",
-        help = "Prefer Dragonfly scheduler over P2P for gguf:// downloads"
+        help = "Prefer Dragonfly scheduler over P2P for gguf:// and hf:// downloads"
     )]
     prefer_dragonfly: bool,
 
@@ -1108,21 +1108,29 @@ async fn download(
         None
     };
 
-    // Capture the inputs for the post-download gguf integrity check before `args` fields are
-    // moved into the download request below.
-    let gguf_verification = (url.scheme() == gguf::SCHEME).then(|| GgufVerification {
-        url: args.url.to_string(),
-        output: args.output.clone(),
-        hugging_face: HuggingFace {
-            revision: args.hf_revision.clone(),
-            token: args.hf_token.clone(),
-            base_url: args.hf_base_url.clone(),
-        },
-        timeout: args.timeout,
-    });
+    // Capture the inputs for the post-download source integrity check before `args` fields
+    // are moved into the download request below. Applies to gguf:// and plain hf:// downloads
+    // alike, so every Hugging Face file format gets the same end-to-end sha256 check.
+    let source_verification = (url.scheme() == gguf::SCHEME
+        || url.scheme() == hugging_face::SCHEME)
+        .then(|| SourceVerification {
+            url: args.url.to_string(),
+            output: args.output.clone(),
+            hugging_face: HuggingFace {
+                revision: args.hf_revision.clone(),
+                token: args.hf_token.clone(),
+                base_url: args.hf_base_url.clone(),
+            },
+            timeout: args.timeout,
+        });
 
-    // Attempt Iroh P2P download for gguf:// URLs before the Dragonfly/HF path.
-    if url.scheme() == gguf::SCHEME && !args.no_p2p && !args.prefer_dragonfly {
+    // Attempt Iroh P2P download for gguf:// and hf:// URLs before the Dragonfly/HF path,
+    // so any Hugging Face file format (safetensors, PyTorch bins, tokenizers, ...) shares
+    // the same peer-to-peer distribution as GGUF models.
+    if (url.scheme() == gguf::SCHEME || url.scheme() == hugging_face::SCHEME)
+        && !args.no_p2p
+        && !args.prefer_dragonfly
+    {
         let tracker_url = args.p2p_tracker.clone();
         let key = p2p::content_key(
             args.url.as_str(),
@@ -1150,8 +1158,8 @@ async fn download(
         .await
         {
             Ok(()) => {
-                if let Some(ref gv) = gguf_verification {
-                    if let Err(e) = verify_downloaded_gguf(gv).await {
+                if let Some(ref gv) = source_verification {
+                    if let Err(e) = verify_downloaded_file(gv).await {
                         error!("P2P download integrity check failed: {e}");
                         // Never leave a corrupt file on disk (mirror the fallback path).
                         fs::remove_file(&gv.output).await.inspect_err(|err| {
@@ -1160,7 +1168,7 @@ async fn download(
                         return Err(e);
                     }
                 }
-                register_gguf_seed(&tracker_url, &key, &output_clone, seed_time);
+                register_p2p_seed(&tracker_url, &key, &output_clone, seed_time);
                 progress_bar.finish_with_message("done (P2P)");
                 return Ok(());
             }
@@ -1386,13 +1394,13 @@ async fn download(
     };
     info!("flush {:?} success", args.output);
 
-    // For gguf:// downloads, verify the downloaded file against the Hugging Face LFS sha256
+    // For gguf:// and hf:// downloads, verify the downloaded file against the Hugging Face LFS sha256
     // (exposed via the X-Linked-Etag header). P2P transit corruption is already caught by
     // Dragonfly's per-piece digests; this is a best-effort, end-to-end source-integrity check.
     // A missing/unavailable digest is logged and skipped; only an actual mismatch is fatal.
-    if let Some(verification) = gguf_verification {
-        if let Err(err) = verify_downloaded_gguf(&verification).await {
-            error!("gguf integrity check failed: {}", err);
+    if let Some(verification) = source_verification {
+        if let Err(err) = verify_downloaded_file(&verification).await {
+            error!("source integrity check failed: {}", err);
             fs::remove_file(&verification.output)
                 .await
                 .inspect_err(|e| {
@@ -1402,7 +1410,7 @@ async fn download(
             return Err(err);
         }
 
-        // The Dragonfly/HF fallback path succeeded for a gguf:// download. Register
+        // The Dragonfly/HF fallback path succeeded for a gguf:// or hf:// download. Register
         // the file for P2P seeding too, so the *first* downloader (who found no peers
         // and fell back) still becomes a seed for everyone after them. Skipped only
         // when P2P is disabled entirely (--no-p2p).
@@ -1412,7 +1420,7 @@ async fn download(
                 &args.hf_revision,
                 args.hf_base_url.as_deref(),
             );
-            register_gguf_seed(&args.p2p_tracker, &key, &args.output, args.seed_time);
+            register_p2p_seed(&args.p2p_tracker, &key, &args.output, args.seed_time);
         }
     }
 
@@ -1420,12 +1428,12 @@ async fn download(
     Ok(())
 }
 
-/// Hand a freshly downloaded gguf:// file off to the long-lived seed service
+/// Hand a freshly downloaded file off to the long-lived seed service
 /// (dfdaemon) by writing a seed manifest. dfget itself exits immediately, so a
 /// task spawned here would be killed before it could seed. Best-effort: a failure
 /// to register only means the file will not be seeded, never that the download
 /// failed. A `seed_time` of 0 disables seeding.
-fn register_gguf_seed(tracker_url: &str, content_key: &str, output: &Path, seed_time: u64) {
+fn register_p2p_seed(tracker_url: &str, content_key: &str, output: &Path, seed_time: u64) {
     if seed_time == 0 {
         return;
     }
@@ -1446,9 +1454,10 @@ fn register_gguf_seed(tracker_url: &str, content_key: &str, output: &Path, seed_
     }
 }
 
-/// GgufVerification holds the inputs needed to verify a downloaded gguf:// file after download.
-struct GgufVerification {
-    /// URL is the original gguf:// URL.
+/// SourceVerification holds the inputs needed to verify a downloaded gguf:// or hf:// file
+/// after download.
+struct SourceVerification {
+    /// URL is the original gguf:// or hf:// URL.
     url: String,
 
     /// Output is the path the file was written to.
@@ -1461,18 +1470,18 @@ struct GgufVerification {
     timeout: Duration,
 }
 
-/// Verifies a downloaded gguf:// file against its Hugging Face LFS sha256 digest.
+/// Verifies a downloaded gguf:// or hf:// file against its Hugging Face LFS sha256 digest.
 ///
 /// The digest is fetched from the backend's `stat` headers (`X-Linked-Etag`). If the digest
 /// cannot be determined (for example, Hugging Face did not expose it, or the `stat` call
 /// failed), verification is skipped with a warning rather than failing the download — P2P
 /// integrity is already guaranteed per-piece. Only a confirmed digest mismatch returns an error.
-async fn verify_downloaded_gguf(verification: &GgufVerification) -> Result<()> {
+async fn verify_downloaded_file(verification: &SourceVerification) -> Result<()> {
     let expected_sha256 = match fetch_expected_sha256(verification).await {
         Some(digest) => digest,
         None => {
             warn!(
-                "skipping gguf integrity check for {:?}: no sha256 digest available from source",
+                "skipping source integrity check for {:?}: no sha256 digest available from source",
                 verification.output
             );
             return Ok(());
@@ -1484,37 +1493,55 @@ async fn verify_downloaded_gguf(verification: &GgufVerification) -> Result<()> {
         verification.output, expected_sha256
     );
     gguf::verify_gguf_digest(&expected_sha256, &verification.output)?;
-    info!("gguf integrity check passed for {:?}", verification.output);
+    info!(
+        "source integrity check passed for {:?}",
+        verification.output
+    );
     Ok(())
 }
 
-/// Fetches the expected sha256 digest for a gguf:// URL from the backend metadata.
+/// Fetches the expected sha256 digest for a gguf:// or hf:// URL from the backend metadata.
 ///
-/// Builds a `gguf` backend and asks it for the file's advertised sha256 (a non-redirecting
-/// `X-Linked-Etag` lookup against Hugging Face, reusing the same Hugging Face options as the
-/// download). Returns `None` if the backend cannot be built or no sha256 is advertised.
-async fn fetch_expected_sha256(verification: &GgufVerification) -> Option<String> {
-    let backend = match gguf::Gguf::new(Arc::new(dfdaemon::Config::default())) {
-        Ok(backend) => backend,
-        Err(err) => {
-            warn!("failed to build gguf backend for integrity check: {}", err);
-            return None;
-        }
+/// `gguf://` URLs go through the `gguf` backend (which validates the `.gguf` extension and
+/// rewrites the scheme); plain `hf://` URLs ask the Hugging Face backend directly, so every
+/// file format works. Both resolve to the same non-redirecting `X-Linked-Etag` lookup against
+/// Hugging Face, reusing the same Hugging Face options as the download. Returns `None` if the
+/// backend cannot be built or no sha256 is advertised.
+async fn fetch_expected_sha256(verification: &SourceVerification) -> Option<String> {
+    let request = StatRequest {
+        task_id: Uuid::new_v4().to_string(),
+        url: verification.url.clone(),
+        http_header: None,
+        timeout: verification.timeout,
+        client_cert: None,
+        object_storage: None,
+        hdfs: None,
+        hugging_face: Some(verification.hugging_face.clone()),
+        model_scope: None,
     };
 
-    backend
-        .fetch_expected_sha256(StatRequest {
-            task_id: Uuid::new_v4().to_string(),
-            url: verification.url.clone(),
-            http_header: None,
-            timeout: verification.timeout,
-            client_cert: None,
-            object_storage: None,
-            hdfs: None,
-            hugging_face: Some(verification.hugging_face.clone()),
-            model_scope: None,
-        })
-        .await
+    if verification.url.starts_with("gguf://") {
+        let backend = match gguf::Gguf::new(Arc::new(dfdaemon::Config::default())) {
+            Ok(backend) => backend,
+            Err(err) => {
+                warn!("failed to build gguf backend for integrity check: {}", err);
+                return None;
+            }
+        };
+        backend.fetch_expected_sha256(request).await
+    } else {
+        let backend = match hugging_face::HuggingFace::new(Arc::new(dfdaemon::Config::default())) {
+            Ok(backend) => backend,
+            Err(err) => {
+                warn!(
+                    "failed to build hugging face backend for integrity check: {}",
+                    err
+                );
+                return None;
+            }
+        };
+        backend.fetch_linked_sha256(request).await
+    }
 }
 
 /// Retrieves all directory entries from a remote storage location.

@@ -52,6 +52,10 @@ chmod +x dfget
 ## ✨ Features
 
 - **`gguf://` URL scheme** — download GGUF models by repo path, with P2P acceleration.
+- **All Hugging Face file formats over P2P** — plain `hf://` URLs (safetensors, PyTorch bins,
+  tokenizers, configs, …) get the same Iroh P2P download, sha256 integrity verification, and
+  automatic seeding as `gguf://`. The `gguf://` scheme remains the strict, `.gguf`-validated
+  entry point.
 - **`.gguf`-only validation** — the backend rejects non-GGUF files with a clear error.
 - **GGUF header metadata** — parse architecture, name, quantization (`general.file_type`), and
   tensor/KV counts from a GGUF file, including via a **range request** that reads just the header
@@ -212,7 +216,16 @@ dfget gguf://owner/repo/model.gguf -O ./model.gguf
 
 `dfget` checks the tracker for peers, downloads from the first available one over Iroh, and verifies
 the result against the source sha256. With no peers (or `--no-p2p`) it falls back to the Dragonfly
-scheduler, then to Hugging Face directly. The default tracker is the community instance, so no flag
+scheduler, then to Hugging Face directly.
+
+The same P2P path works for **any** Hugging Face file via the `hf://` scheme — not just GGUF:
+
+```shell
+dfget hf://owner/repo/model.safetensors -O ./model.safetensors
+dfget hf://owner/repo/tokenizer.json   -O ./tokenizer.json
+```
+
+The default tracker is the community instance, so no flag
 is needed; point at your own with `--p2p-tracker`:
 
 ```shell
