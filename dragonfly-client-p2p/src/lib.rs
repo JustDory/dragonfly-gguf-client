@@ -4,7 +4,7 @@ mod seeder;
 mod tracker;
 
 pub use seeder::{default_registry_dir, register_seed, run_seed_service, SeedManifest};
-pub use tracker::TrackerClient;
+pub use tracker::{FileMeta, TrackerClient};
 
 use anyhow::Result;
 use sha2::Digest;

@@ -287,10 +287,20 @@ docker run -p 8080:8080 dragonfly-tracker
 
 ```
 POST /announce
-  Body: { "content_key": "<64-char hex>", "node_id": "<iroh node id>", "addr_info": "<json>" }
+  Body: { "content_key": "<64-char hex>", "node_id": "<iroh node id>", "addr_info": "<json>",
+          "filename": "<optional>", "format": "<optional>", "size": <optional bytes> }
+  The optional metadata describes what the content key is (keys are one-way
+  hashes). Seeding daemons send it automatically, derived from the seeded file.
 
 GET /peers?content_key=<64-char hex>
   Response: { "providers": [{ "node_id": "...", "addr_info": "...", "last_seen": <unix ts> }] }
+
+GET /contents?format=<optional>&q=<optional>&limit=<optional, default 100>
+  Lists every content key with at least one live provider, most-seeded first.
+  `format` filters by announced format ("gguf", "safetensors", ...) — categories;
+  `q` is a case-insensitive filename substring — search.
+  Response: { "contents": [{ "content_key": "...", "filename": "...", "format": "...",
+                             "size": ..., "providers": <n>, "last_seen": <unix ts> }] }
 
 DELETE /leave
   Body: { "content_key": "...", "node_id": "..." }

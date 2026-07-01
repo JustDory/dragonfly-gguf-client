@@ -89,9 +89,14 @@ Unlike the upstream crates (which forbid `anyhow` in library code and use `DFErr
 ### Discovery tracker — `dragonfly-tracker/`
 
 Lightweight HTTP peer-discovery service (`src/{routes,store}.rs`). Endpoints: `POST /announce`,
-`GET /peers?content_key=<hex>`, `DELETE /leave`. In-memory store with per-peer TTL eviction and
-per-IP announce rate limiting. Default community instance: `https://tracker.dragonfly-gguf.dev`
-(`DEFAULT_TRACKER_URL` in the p2p crate).
+`GET /peers?content_key=<hex>`, `DELETE /leave`, and `GET /contents?format=&q=&limit=` (lists every
+content key with live providers, most-seeded first — powers registry search/categories). `/announce`
+accepts optional `filename`/`format`/`size` metadata: content keys are one-way hashes, so this is the
+only way the tracker can know what a key is. The seed service announces it automatically (derived
+from the manifest's file path); all fields are optional in both directions, so old clients and old
+trackers interoperate. In-memory store with per-peer TTL eviction (metadata is dropped when a key's
+last provider expires) and per-IP announce rate limiting. Default community instance:
+`https://tracker.dragonfly-gguf.dev` (`DEFAULT_TRACKER_URL` in the p2p crate).
 
 ### Download fallback order
 
