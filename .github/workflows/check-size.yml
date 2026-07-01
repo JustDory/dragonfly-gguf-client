@@ -15,7 +15,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          fetch-depth: 1
+          # Full history so lfs-warning can diff the PR against its base ref;
+          # a shallow clone (fetch-depth: 1) makes the action error out.
+          fetch-depth: 0
 
       - name: Check large files
         uses: actionsdesk/lfs-warning@v3.3

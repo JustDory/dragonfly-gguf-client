@@ -11,6 +11,9 @@ jobs:
   classify:
     name: Classify PR
     runs-on: ubuntu-latest
+    # Advisory only: suggest an impact label but never fail the PR over it.
+    # Automated/Dependabot PRs can't reliably carry a manual label.
+    continue-on-error: true
     steps:
       - name: PR impact specified
         uses: mheap/github-action-required-labels@0ac283b4e65c1fb28ce6079dea5546ceca98ccbe # v5.5
