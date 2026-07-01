@@ -1,4 +1,6 @@
-FROM rust:1.88.0 AS builder
+# 1.96 = current stable; the iroh 1.0 crates used by dragonfly-client-p2p
+# require rustc >= 1.91, so this must stay at or above that floor.
+FROM rust:1.96.0 AS builder
 
 WORKDIR /app/client
 
