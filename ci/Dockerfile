@@ -42,6 +42,12 @@ COPY dragonfly-client-util/examples/request/src ./dragonfly-client-util/examples
 COPY dragonfly-client-init/Cargo.toml ./dragonfly-client-init/Cargo.toml
 COPY dragonfly-client-init/src ./dragonfly-client-init/src
 
+COPY dragonfly-client-p2p/Cargo.toml ./dragonfly-client-p2p/Cargo.toml
+COPY dragonfly-client-p2p/src ./dragonfly-client-p2p/src
+
+COPY dragonfly-tracker/Cargo.toml ./dragonfly-tracker/Cargo.toml
+COPY dragonfly-tracker/src ./dragonfly-tracker/src
+
 ARG TARGETPLATFORM
 RUN case "${TARGETPLATFORM}" in \
   "linux/arm64") export JEMALLOC_SYS_WITH_LG_PAGE=16;; \
