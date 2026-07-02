@@ -32,11 +32,15 @@ pub struct ContentSummary {
     pub size: Option<u64>,
     pub providers: usize,
     pub last_seen: u64,
+    /// When the first provider for this key announced (the "uploaded" time in
+    /// registry listings). Reset if the key fully expires and comes back.
+    pub first_seen: u64,
 }
 
 pub struct PeerStore {
     data: DashMap<String, Vec<PeerEntry>>,
     meta: DashMap<String, ContentMeta>,
+    first_seen: DashMap<String, u64>,
     rate_limits: DashMap<IpAddr, (u32, Instant)>,
     pub ttl_secs: u64,
     pub rate_limit_per_min: u32,
@@ -47,6 +51,7 @@ impl PeerStore {
         Arc::new(Self {
             data: DashMap::new(),
             meta: DashMap::new(),
+            first_seen: DashMap::new(),
             rate_limits: DashMap::new(),
             ttl_secs,
             rate_limit_per_min,
@@ -83,6 +88,9 @@ impl PeerStore {
         if let Some(meta) = meta {
             self.meta.insert(content_key.clone(), meta);
         }
+        self.first_seen
+            .entry(content_key.clone())
+            .or_insert_with(now_secs);
         let mut peers = self.data.entry(content_key).or_default();
         match peers.iter_mut().find(|p| p.node_id == node_id) {
             Some(existing) => *existing = entry,
@@ -147,13 +155,19 @@ impl PeerStore {
                     }
                 }
 
+                let last_seen = live.iter().map(|p| p.last_seen).max().unwrap_or(0);
                 Some(ContentSummary {
                     content_key: entry.key().clone(),
                     filename,
                     format: fmt,
                     size,
                     providers: live.len(),
-                    last_seen: live.iter().map(|p| p.last_seen).max().unwrap_or(0),
+                    last_seen,
+                    first_seen: self
+                        .first_seen
+                        .get(entry.key())
+                        .map(|v| *v)
+                        .unwrap_or(last_seen),
                 })
             })
             .collect();
@@ -179,9 +193,11 @@ impl PeerStore {
             entry.value_mut().retain(|p| p.last_seen >= cutoff);
         }
         self.data.retain(|_, v| !v.is_empty());
-        // Drop metadata for keys that no longer have any providers, so the
-        // meta map cannot grow without bound once all seeders are gone.
+        // Drop metadata and first-seen timestamps for keys that no longer have
+        // any providers, so these maps cannot grow without bound once all
+        // seeders are gone.
         self.meta.retain(|k, _| self.data.contains_key(k));
+        self.first_seen.retain(|k, _| self.data.contains_key(k));
     }
 }
 
@@ -230,6 +246,7 @@ mod tests {
         assert_eq!(described.filename.as_deref(), Some("model.safetensors"));
         assert_eq!(described.size, Some(42));
         assert_eq!(described.providers, 1);
+        assert!(described.first_seen > 0 && described.first_seen <= described.last_seen);
     }
 
     #[test]
@@ -304,5 +321,6 @@ mod tests {
         store.evict_expired();
         assert!(store.data.is_empty());
         assert!(store.meta.is_empty());
+        assert!(store.first_seen.is_empty());
     }
 }

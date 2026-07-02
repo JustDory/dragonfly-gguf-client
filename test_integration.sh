@@ -42,6 +42,13 @@ CONTENT_COUNT=$(echo "$CONTENTS" | python3 -c 'import sys,json; print(len(json.l
 CONTENT_NAME=$(echo "$CONTENTS" | python3 -c 'import sys,json; c=json.load(sys.stdin)["contents"]; print(c[0]["filename"] if c else "")')
 echo "Filtered content count: $CONTENT_COUNT (filename: $CONTENT_NAME)"
 
+echo "=== Registry UI page ==="
+UI_OK=0
+if curl -sf "http://127.0.0.1:$PORT/?format=safetensors" | grep -q "model.safetensors"; then
+  UI_OK=1
+  echo "UI page lists the announced file"
+fi
+
 echo "=== Rate limit test (11 announces from same IP) ==="
 RATE_BLOCKED=0
 for i in $(seq 1 11); do
@@ -67,9 +74,9 @@ echo "Provider count after leave: $PEER_COUNT_AFTER"
 
 echo ""
 if [ "$PEER_COUNT" = "1" ] && [ "$PEER_COUNT_AFTER" = "0" ] && [ "$RATE_BLOCKED" = "1" ] \
-  && [ "$CONTENT_COUNT" = "1" ] && [ "$CONTENT_NAME" = "model.safetensors" ]; then
+  && [ "$CONTENT_COUNT" = "1" ] && [ "$CONTENT_NAME" = "model.safetensors" ] && [ "$UI_OK" = "1" ]; then
   echo "=== ALL TRACKER TESTS PASSED ==="
 else
-  echo "=== TRACKER TESTS FAILED (peers=$PEER_COUNT, after_leave=$PEER_COUNT_AFTER, rate_blocked=$RATE_BLOCKED, contents=$CONTENT_COUNT/$CONTENT_NAME) ==="
+  echo "=== TRACKER TESTS FAILED (peers=$PEER_COUNT, after_leave=$PEER_COUNT_AFTER, rate_blocked=$RATE_BLOCKED, contents=$CONTENT_COUNT/$CONTENT_NAME, ui=$UI_OK) ==="
   exit 1
 fi

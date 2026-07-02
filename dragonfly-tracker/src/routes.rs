@@ -151,7 +151,14 @@ pub fn routes(
         .and(with_store(store.clone()))
         .and_then(handle_contents);
 
-    announce.or(peers).or(leave).or(contents)
+    // Embedded registry UI: the human-readable view of /contents.
+    let ui = warp::get()
+        .and(warp::path::end())
+        .and(warp::query::<ContentsQuery>())
+        .and(with_store(store.clone()))
+        .and_then(handle_ui);
+
+    announce.or(peers).or(leave).or(contents).or(ui)
 }
 
 async fn handle_announce(
@@ -234,6 +241,21 @@ async fn handle_contents(
         warp::reply::json(&ContentsResponse { contents }),
         warp::http::StatusCode::OK,
     ))
+}
+
+async fn handle_ui(
+    query: ContentsQuery,
+    store: Arc<PeerStore>,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_CONTENTS_LIMIT)
+        .min(MAX_CONTENTS_LIMIT);
+    // Treat empty query params ("?q=&format=") as absent so a submitted empty
+    // form shows the full listing.
+    let format = query.format.as_deref().filter(|f| !f.is_empty());
+    let q = query.q.as_deref().filter(|q| !q.is_empty());
+    Ok(warp::reply::html(crate::ui::page(&store, format, q, limit)))
 }
 
 #[cfg(test)]
