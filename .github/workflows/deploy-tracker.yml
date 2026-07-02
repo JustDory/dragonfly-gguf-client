@@ -1,0 +1,85 @@
+name: Deploy Tracker
+
+# Builds the tracker image, publishes it to GHCR, and (when the deploy
+# secrets are configured) restarts the community tracker instance over SSH
+# from the GitHub-hosted runner. Manual trigger only: deploying the shared
+# instance should always be a deliberate act.
+#
+# Required for the deploy step (Settings -> Secrets and variables -> Actions):
+#   secret  TRACKER_DEPLOY_HOST  e.g. tracker.dragonfly-gguf.dev or the EC2 IP
+#   secret  TRACKER_DEPLOY_USER  e.g. ubuntu
+#   secret  TRACKER_DEPLOY_KEY   private key for that user (rotate the old one!)
+#   variable TRACKER_COMPOSE_DIR directory holding docker-compose.yml
+#                                (optional, defaults to ~/tracker)
+# Without the secrets, the workflow still builds and pushes the image and the
+# deploy step skips cleanly.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build_and_deploy:
+    name: Build, push and deploy tracker
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: PrepareReg Names
+        run: |
+          echo IMAGE_REPOSITORY=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]') >> $GITHUB_ENV
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push tracker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/tracker/Dockerfile
+          platforms: linux/amd64
+          labels: |-
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          tags: |
+            ghcr.io/${{ env.IMAGE_REPOSITORY }}/tracker:latest
+            ghcr.io/${{ env.IMAGE_REPOSITORY }}/tracker:${{ github.sha }}
+          push: true
+
+      - name: Deploy to tracker instance
+        if: ${{ secrets.TRACKER_DEPLOY_HOST != '' && secrets.TRACKER_DEPLOY_KEY != '' }}
+        env:
+          DEPLOY_HOST: ${{ secrets.TRACKER_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.TRACKER_DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.TRACKER_DEPLOY_KEY }}
+          COMPOSE_DIR: ${{ vars.TRACKER_COMPOSE_DIR }}
+        run: |
+          set -euo pipefail
+          key_file=$(mktemp)
+          trap 'rm -f "$key_file"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$key_file"
+          chmod 600 "$key_file"
+          ssh -i "$key_file" \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=15 \
+            "${DEPLOY_USER:-ubuntu}@${DEPLOY_HOST}" \
+            "cd ${COMPOSE_DIR:-~/tracker} && docker compose pull tracker && docker compose up -d tracker && docker compose ps tracker"
+
+      - name: Deploy skipped (no secrets)
+        if: ${{ secrets.TRACKER_DEPLOY_HOST == '' || secrets.TRACKER_DEPLOY_KEY == '' }}
+        run: |
+          echo "::notice::Image pushed to ghcr.io/${IMAGE_REPOSITORY}/tracker:latest."
+          echo "::notice::TRACKER_DEPLOY_HOST / TRACKER_DEPLOY_KEY secrets not set - skipped SSH deploy."
+          echo "::notice::On the instance run: docker compose pull tracker && docker compose up -d tracker"
