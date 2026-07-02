@@ -12,7 +12,7 @@ name: Deploy Tracker
 #   variable TRACKER_COMPOSE_DIR directory holding docker-compose.yml
 #                                (optional, defaults to ~/tracker)
 # Without the secrets, the workflow still builds and pushes the image and the
-# deploy step skips cleanly.
+# deploy step prints manual instructions instead.
 
 on:
   workflow_dispatch:
@@ -58,8 +58,9 @@ jobs:
             ghcr.io/${{ env.IMAGE_REPOSITORY }}/tracker:${{ github.sha }}
           push: true
 
-      - name: Deploy to tracker instance
-        if: ${{ secrets.TRACKER_DEPLOY_HOST != '' && secrets.TRACKER_DEPLOY_KEY != '' }}
+      # The secrets context is not available in step-level `if:` expressions,
+      # so the presence check happens in the shell via env.
+      - name: Deploy to tracker instance (or print manual instructions)
         env:
           DEPLOY_HOST: ${{ secrets.TRACKER_DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.TRACKER_DEPLOY_USER }}
@@ -67,6 +68,12 @@ jobs:
           COMPOSE_DIR: ${{ vars.TRACKER_COMPOSE_DIR }}
         run: |
           set -euo pipefail
+          if [ -z "${DEPLOY_HOST}" ] || [ -z "${DEPLOY_KEY}" ]; then
+            echo "::notice::Image pushed to ghcr.io/${IMAGE_REPOSITORY}/tracker:latest."
+            echo "::notice::TRACKER_DEPLOY_HOST / TRACKER_DEPLOY_KEY secrets not set - skipping SSH deploy."
+            echo "::notice::On the instance run: docker compose pull tracker && docker compose up -d tracker"
+            exit 0
+          fi
           key_file=$(mktemp)
           trap 'rm -f "$key_file"' EXIT
           printf '%s\n' "$DEPLOY_KEY" > "$key_file"
@@ -76,10 +83,3 @@ jobs:
             -o ConnectTimeout=15 \
             "${DEPLOY_USER:-ubuntu}@${DEPLOY_HOST}" \
             "cd ${COMPOSE_DIR:-~/tracker} && docker compose pull tracker && docker compose up -d tracker && docker compose ps tracker"
-
-      - name: Deploy skipped (no secrets)
-        if: ${{ secrets.TRACKER_DEPLOY_HOST == '' || secrets.TRACKER_DEPLOY_KEY == '' }}
-        run: |
-          echo "::notice::Image pushed to ghcr.io/${IMAGE_REPOSITORY}/tracker:latest."
-          echo "::notice::TRACKER_DEPLOY_HOST / TRACKER_DEPLOY_KEY secrets not set - skipped SSH deploy."
-          echo "::notice::On the instance run: docker compose pull tracker && docker compose up -d tracker"
