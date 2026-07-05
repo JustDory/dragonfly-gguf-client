@@ -43,7 +43,7 @@ server {
     }
 
     # Proxy tracker API endpoints to the Rust binary on 8080
-    location ~ ^/(peers|announce|leave)$ {
+    location ~ ^/(peers|announce|leave|contents)$ {
         proxy_pass         http://127.0.0.1:8080;
         proxy_set_header   Host $host;
         proxy_set_header   X-Real-IP $remote_addr;
