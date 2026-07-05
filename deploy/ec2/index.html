@@ -350,7 +350,8 @@
 // live seed counts + peers-only content. nginx proxies /contents -> tracker:8080.
 const CONTENTS_URL = '/contents';
 const HF_API = 'https://huggingface.co/api/models';
-const HF_LIMIT = 60;
+const GGUF_LIMIT = 45;   // top GGUF models (single-file quants)
+const SAFE_LIMIT = 25;   // top SafeTensors models (sharded, grouped per model)
 const QUANT_PREFS = ['Q4_K_M','Q4_K_S','Q5_K_M','Q4_K','Q5_K','Q3_K_M','Q4_0','Q5_0','Q8_0'];
 
 // ---- state -------------------------------------------------------------
@@ -414,7 +415,19 @@ function pickGguf(siblings) {
 // ---- load: HF-primary, tracker-enriched --------------------------------
 async function load() {
   document.getElementById('tbody').innerHTML = '<tr><td colspan="7" class="empty">Loading registry…</td></tr>';
-  await loadHuggingFace();
+  state.items = [];
+  const seen = new Set();          // dedupe by repo across the two HF queries
+  const errors = [];
+  await loadGguf(seen, errors);          // single-file GGUF quants
+  await loadSafetensors(seen, errors);   // SafeTensors models, shards grouped per repo
+
+  if (!state.items.length) {
+    document.getElementById('tbody').innerHTML =
+      '<tr><td colspan="7" class="empty err">Failed to load models from Hugging Face' +
+      (errors.length ? ': ' + escapeHtml(errors.join('; ')) : '') + '</td></tr>';
+    return;
+  }
+
   const enriched = await enrichFromTracker();
   if (!enriched) {
     showNotice('<strong>Live seed counts unavailable.</strong> The P2P tracker index isn’t reachable yet — showing openly-licensed models from Hugging Face without swarm stats.');
@@ -425,43 +438,76 @@ async function load() {
   runAvailabilityChecks();
 }
 
-// Primary source: top openly-licensed GGUF models on Hugging Face.
-async function loadHuggingFace() {
-  try {
-    const r = await fetch(
-      HF_API + '?filter=gguf&sort=downloads&direction=-1&limit=' + HF_LIMIT + '&full=true',
-      { signal: AbortSignal.timeout(20000) }
-    );
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const data = await r.json();
-    state.items = [];
-    for (const model of data) {
-      const filename = pickGguf(model.siblings);
-      if (!filename) continue;
-      const repo = model.id;
-      const displayName = repo.split('/').pop().replace(/-GGUF$/i, '');
-      const format = 'GGUF';
-      state.items.push({
-        key: 'hf:' + repo,
-        category: normCat(categorize(model.pipeline_tag, format)),
-        format,
-        name: displayName,
-        repo,
-        filename,
-        params: extractParams(repo.split('/').pop()),
-        size: null,
-        seeds: null,
-        lastSeen: null,
-        hfUrl: 'https://huggingface.co/' + repo,
-        dfget: 'dfget --p2p-tracker ' + location.origin + ' ' + scheme(format) + '://' + repo + '/' + filename,
-        peersOnly: false,
-        status: 'checking'
-      });
-    }
-  } catch (e) {
-    state.items = [];
-    document.getElementById('tbody').innerHTML =
-      '<tr><td colspan="7" class="empty err">Failed to load models from Hugging Face: ' + escapeHtml(e.message) + '</td></tr>';
+async function fetchHfList(filter, limit) {
+  const r = await fetch(
+    HF_API + '?filter=' + filter + '&sort=downloads&direction=-1&limit=' + limit + '&full=true',
+    { signal: AbortSignal.timeout(20000) }
+  );
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+// Top GGUF models — one row per model, best single quant file.
+async function loadGguf(seen, errors) {
+  let data;
+  try { data = await fetchHfList('gguf', GGUF_LIMIT); }
+  catch (e) { errors.push('GGUF: ' + e.message); return; }
+  for (const model of data) {
+    const filename = pickGguf(model.siblings);
+    if (!filename) continue;
+    const repo = model.id;
+    if (seen.has(repo)) continue;
+    seen.add(repo);
+    const displayName = repo.split('/').pop().replace(/-GGUF$/i, '');
+    state.items.push({
+      key: 'hf:' + repo,
+      category: normCat(categorize(model.pipeline_tag, 'GGUF')),
+      format: 'GGUF',
+      name: displayName,
+      repo,
+      matchFiles: [filename],
+      shardCount: 1,
+      params: extractParams(repo.split('/').pop()),
+      size: null, seeds: null, lastSeen: null,
+      hfUrl: 'https://huggingface.co/' + repo,
+      dfget: 'dfget --p2p-tracker ' + location.origin + ' gguf://' + repo + '/' + filename,
+      peersOnly: false,
+      status: 'checking'
+    });
+  }
+}
+
+// Top SafeTensors models — one row per model, ALL shards grouped. The dfget
+// command uses a repo-level hf:// URL with a trailing slash so `dfget --recursive`
+// pulls every shard (+ index/config) in a single command.
+async function loadSafetensors(seen, errors) {
+  let data;
+  try { data = await fetchHfList('safetensors', SAFE_LIMIT); }
+  catch (e) { errors.push('SafeTensors: ' + e.message); return; }
+  for (const model of data) {
+    const repo = model.id;
+    if (seen.has(repo)) continue;
+    const shards = (model.siblings || [])
+      .map(s => s.rfilename)
+      .filter(f => f && f.toLowerCase().endsWith('.safetensors'));
+    if (!shards.length) continue;
+    seen.add(repo);
+    const displayName = repo.split('/').pop();
+    state.items.push({
+      key: 'hf:' + repo,
+      category: normCat(categorize(model.pipeline_tag, 'SAFETENSORS')),
+      format: 'SAFETENSORS',
+      name: displayName,
+      repo,
+      matchFiles: shards,          // group: all shard files belong to this model
+      shardCount: shards.length,
+      params: extractParams(displayName),
+      size: null, seeds: null, lastSeen: null,
+      hfUrl: 'https://huggingface.co/' + repo,
+      dfget: 'dfget --p2p-tracker ' + location.origin + ' --recursive hf://' + repo + '/',
+      peersOnly: false,
+      status: 'checking'
+    });
   }
 }
 
@@ -487,12 +533,22 @@ async function enrichFromTracker() {
 
     const matched = new Set();
     for (const it of state.items) {
-      const c = byFile.get(it.filename);
-      if (!c) continue;
-      it.seeds = c.providers ?? c.seeds ?? null;
-      it.lastSeen = c.last_seen ?? c.lastSeen ?? null;
-      if (it.size == null && c.size != null) it.size = c.size;
-      matched.add(it.filename);
+      const providers = [], seens = [];
+      let sizeSum = 0, anySize = false;
+      for (const fn of (it.matchFiles || [])) {
+        const c = byFile.get(fn);
+        if (!c) continue;
+        matched.add(fn);
+        if ((c.providers ?? c.seeds) != null) providers.push(c.providers ?? c.seeds);
+        if ((c.last_seen ?? c.lastSeen) != null) seens.push(c.last_seen ?? c.lastSeen);
+        if (c.size != null) { sizeSum += c.size; anySize = true; }
+      }
+      if (!providers.length && !seens.length && !anySize) continue;
+      // A grouped model is only fully fetchable from peers that have every shard,
+      // so seeds = the min across its shards; last-seen = the most recent.
+      if (providers.length) it.seeds = Math.min(...providers);
+      if (seens.length) it.lastSeen = Math.max(...seens);
+      if (it.size == null && anySize) it.size = sizeSum;
     }
 
     for (const [fn, c] of byFile) {
@@ -504,7 +560,8 @@ async function enrichFromTracker() {
         format,
         name: fn,
         repo: '',
-        filename: fn,
+        matchFiles: [fn],
+        shardCount: 1,
         params: extractParams(fn),
         size: c.size ?? null,
         seeds: c.providers ?? c.seeds ?? null,
@@ -550,7 +607,8 @@ function applyFilters() {
       '<td><span class="cat cat-' + escapeHtml(it.category) + '">' + escapeHtml(it.category) + '</span></td>' +
       '<td class="model-name">' + nameCell +
         (it.format ? '<span class="fmt-tag">' + escapeHtml(it.format) + '</span>' : '') +
-        (it.params ? '<span class="fmt-tag">' + escapeHtml(it.params) + '</span>' : '') + '</td>' +
+        (it.params ? '<span class="fmt-tag">' + escapeHtml(it.params) + '</span>' : '') +
+        (it.shardCount > 1 ? '<span class="fmt-tag" title="Grouped: one command downloads all shards">' + it.shardCount + ' shards</span>' : '') + '</td>' +
       '<td class="size-cell">' + escapeHtml(formatBytes(it.size)) + '</td>' +
       '<td class="seeds-cell">' + (it.seeds != null ? '<b>' + escapeHtml(formatSeeds(it.seeds)) + '</b>' : '—') + '</td>' +
       '<td class="seen-cell">' + escapeHtml(relTime(it.lastSeen)) + '</td>' +
@@ -588,13 +646,33 @@ async function copyCmd(btn, text) {
   }
 }
 
+function updateSizeCell(it) {
+  if (it._tr) {
+    const c = it._tr.querySelector('.size-cell');
+    if (c) c.textContent = formatBytes(it.size);
+  }
+}
+
 // Live HF availability check per model with a repo (best-effort, non-blocking).
+// For SafeTensors models we also sum shard sizes (blobs=true) to show total size.
 async function runAvailabilityChecks() {
   await Promise.all(state.items.map(async it => {
     if (it.peersOnly || !it.repo) return;   // peers-only rows stay "Peers only"
+    const needSize = it.format === 'SAFETENSORS' && it.size == null;
     try {
-      const r = await fetch(HF_API + '/' + it.repo, { signal: AbortSignal.timeout(12000) });
-      setStatus(it, r.ok ? 'available' : 'unavailable');
+      const r = await fetch(HF_API + '/' + it.repo + (needSize ? '?blobs=true' : ''), { signal: AbortSignal.timeout(12000) });
+      if (!r.ok) { setStatus(it, 'unavailable'); return; }
+      if (needSize) {
+        const m = await r.json();
+        let sum = 0;
+        for (const s of (m.siblings || [])) {
+          if (s.rfilename && s.rfilename.toLowerCase().endsWith('.safetensors')) {
+            sum += (s.size ?? s.lfs?.size ?? 0);
+          }
+        }
+        if (sum > 0) { it.size = sum; updateSizeCell(it); }
+      }
+      setStatus(it, 'available');
     } catch {
       setStatus(it, 'unavailable');
     }
