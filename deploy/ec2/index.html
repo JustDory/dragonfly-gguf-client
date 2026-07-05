@@ -302,7 +302,6 @@
       <button class="tab" data-cat="LLM">LLM</button>
       <button class="tab" data-cat="EMB">Embeddings</button>
       <button class="tab" data-cat="DATA">Datasets</button>
-      <button class="tab" data-cat="APP">Apps</button>
     </div>
     <select class="format-select" id="format">
       <option value="all">All formats</option>
@@ -350,8 +349,10 @@
 // live seed counts + peers-only content. nginx proxies /contents -> tracker:8080.
 const CONTENTS_URL = '/contents';
 const HF_API = 'https://huggingface.co/api/models';
+const HF_DATASETS_API = 'https://huggingface.co/api/datasets';
 const GGUF_LIMIT = 45;   // top GGUF models (single-file quants)
 const SAFE_LIMIT = 25;   // top SafeTensors models (sharded, grouped per model)
+const DATA_LIMIT = 20;   // top datasets (grouped per dataset repo)
 const QUANT_PREFS = ['Q4_K_M','Q4_K_S','Q5_K_M','Q4_K','Q5_K','Q3_K_M','Q4_0','Q5_0','Q8_0'];
 
 // ---- state -------------------------------------------------------------
@@ -420,6 +421,7 @@ async function load() {
   const errors = [];
   await loadGguf(seen, errors);          // single-file GGUF quants
   await loadSafetensors(seen, errors);   // SafeTensors models, shards grouped per repo
+  await loadDatasets(seen, errors);      // datasets, grouped per repo
 
   if (!state.items.length) {
     document.getElementById('tbody').innerHTML =
@@ -505,6 +507,42 @@ async function loadSafetensors(seen, errors) {
       size: null, seeds: null, lastSeen: null,
       hfUrl: 'https://huggingface.co/' + repo,
       dfget: 'dfget --p2p-tracker ' + location.origin + ' --recursive hf://' + repo + '/',
+      peersOnly: false,
+      status: 'checking'
+    });
+  }
+}
+
+// Top datasets — one row per dataset repo. The whole dataset downloads with a
+// single repo-level directory command (hf://datasets/<owner>/<name>/).
+async function loadDatasets(seen, errors) {
+  let data;
+  try {
+    const r = await fetch(
+      HF_DATASETS_API + '?sort=downloads&direction=-1&limit=' + DATA_LIMIT,
+      { signal: AbortSignal.timeout(20000) }
+    );
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    data = await r.json();
+  } catch (e) { errors.push('Datasets: ' + e.message); return; }
+  for (const ds of data) {
+    const repo = ds.id;
+    if (!repo || seen.has('ds:' + repo)) continue;
+    seen.add('ds:' + repo);
+    const displayName = repo.includes('/') ? repo.split('/').pop() : repo;
+    state.items.push({
+      key: 'ds:' + repo,
+      category: 'DATA',
+      format: '',                  // datasets are multi-format; no single format badge
+      name: displayName,
+      repo,
+      isDataset: true,
+      matchFiles: [],
+      shardCount: 1,
+      params: null,
+      size: null, seeds: null, lastSeen: null,
+      hfUrl: 'https://huggingface.co/datasets/' + repo,
+      dfget: 'dfget --p2p-tracker ' + location.origin + ' --recursive hf://datasets/' + repo + '/',
       peersOnly: false,
       status: 'checking'
     });
@@ -608,7 +646,7 @@ function applyFilters() {
       '<td class="model-name">' + nameCell +
         (it.format ? '<span class="fmt-tag">' + escapeHtml(it.format) + '</span>' : '') +
         (it.params ? '<span class="fmt-tag">' + escapeHtml(it.params) + '</span>' : '') +
-        (it.shardCount > 1 ? '<span class="fmt-tag" title="Grouped: one command downloads all shards">' + it.shardCount + ' shards</span>' : '') + '</td>' +
+        (it.format === 'SAFETENSORS' && it.shardCount > 1 ? '<span class="fmt-tag" title="Grouped: one command downloads all shards">' + it.shardCount + ' shards</span>' : '') + '</td>' +
       '<td class="size-cell">' + escapeHtml(formatBytes(it.size)) + '</td>' +
       '<td class="seeds-cell">' + (it.seeds != null ? '<b>' + escapeHtml(formatSeeds(it.seeds)) + '</b>' : '—') + '</td>' +
       '<td class="seen-cell">' + escapeHtml(relTime(it.lastSeen)) + '</td>' +
@@ -658,9 +696,10 @@ function updateSizeCell(it) {
 async function runAvailabilityChecks() {
   await Promise.all(state.items.map(async it => {
     if (it.peersOnly || !it.repo) return;   // peers-only rows stay "Peers only"
+    const apiBase = it.isDataset ? (HF_DATASETS_API + '/') : (HF_API + '/');
     const needSize = it.format === 'SAFETENSORS' && it.size == null;
     try {
-      const r = await fetch(HF_API + '/' + it.repo + (needSize ? '?blobs=true' : ''), { signal: AbortSignal.timeout(12000) });
+      const r = await fetch(apiBase + it.repo + (needSize ? '?blobs=true' : ''), { signal: AbortSignal.timeout(12000) });
       if (!r.ok) { setStatus(it, 'unavailable'); return; }
       if (needSize) {
         const m = await r.json();
