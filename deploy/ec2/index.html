@@ -3,19 +3,22 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dragonfly GGUF — Model Registry</title>
+  <title>Dragonfly — Open Model Registry</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
       --bg: #0d1117;
       --surface: #161b22;
+      --surface-2: #1c2128;
       --border: #30363d;
       --accent: #58a6ff;
       --accent-dim: #1f6feb;
       --green: #3fb950;
       --red: #f85149;
       --yellow: #d29922;
+      --purple: #bc8cff;
+      --teal: #39c5cf;
       --text: #e6edf3;
       --muted: #8b949e;
       --code-bg: #1c2128;
@@ -70,43 +73,88 @@
     nav a.active { color: var(--text); }
 
     main {
-      max-width: 960px;
+      max-width: 1040px;
       margin: 0 auto;
       padding: 2.5rem 2rem 4rem;
     }
 
-    .page-header {
-      margin-bottom: 1.75rem;
-    }
+    .page-header { margin-bottom: 1.5rem; }
+    .page-header h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.3rem; }
+    .page-header p { color: var(--muted); font-size: 0.9rem; }
 
-    .page-header h1 {
-      font-size: 1.5rem;
-      font-weight: 700;
-      margin-bottom: 0.3rem;
-    }
-
-    .page-header p {
+    .notice {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 0.6rem 0.9rem;
+      font-size: 0.82rem;
       color: var(--muted);
-      font-size: 0.9rem;
+      margin-bottom: 1.25rem;
+      display: none;
+    }
+    .notice.show { display: block; }
+    .notice strong { color: var(--text); font-weight: 600; }
+
+    /* controls */
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 1.25rem;
     }
 
-    .table-wrap {
-      overflow-x: auto;
+    .search {
+      flex: 1 1 260px;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 8px;
+      padding: 0.5rem 0.75rem;
     }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
+    .search:focus-within { border-color: var(--accent-dim); }
+    .search input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
       font-size: 0.9rem;
     }
+    .search input::placeholder { color: var(--muted); }
+    .search svg { flex-shrink: 0; }
 
-    thead tr {
+    .tabs { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+    .tab {
       background: var(--surface);
-      border-bottom: 1px solid var(--border);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 0.4rem 0.75rem;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .tab:hover { color: var(--text); border-color: var(--muted); }
+    .tab.active { background: var(--accent-dim); border-color: var(--accent-dim); color: #fff; }
+
+    select.format-select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 0.82rem;
+      padding: 0.42rem 0.6rem;
+      border-radius: 6px;
+      cursor: pointer;
+      outline: none;
     }
 
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    thead tr { background: var(--surface); border-bottom: 1px solid var(--border); }
     th {
       text-align: left;
       padding: 0.75rem 1rem;
@@ -117,92 +165,104 @@
       letter-spacing: 0.05em;
       white-space: nowrap;
     }
-
-    tbody tr {
-      border-bottom: 1px solid var(--border);
-      transition: background 0.1s;
-    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
     tbody tr:last-child { border-bottom: none; }
     tbody tr:hover { background: var(--surface); }
+    td { padding: 0.85rem 1rem; vertical-align: middle; }
 
-    td {
-      padding: 0.85rem 1rem;
-      vertical-align: middle;
+    /* category badge */
+    .cat {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 0.14rem 0.45rem;
+      border-radius: 4px;
+      text-transform: uppercase;
     }
+    .cat-LLM  { background: rgba(88,166,255,0.15);  color: var(--accent); border: 1px solid rgba(88,166,255,0.35); }
+    .cat-EMB  { background: rgba(57,197,207,0.15);  color: var(--teal);   border: 1px solid rgba(57,197,207,0.35); }
+    .cat-DATA { background: rgba(63,185,80,0.15);   color: var(--green);  border: 1px solid rgba(63,185,80,0.35); }
+    .cat-APP  { background: rgba(188,140,255,0.15); color: var(--purple); border: 1px solid rgba(188,140,255,0.35); }
+    .cat-MODEL{ background: var(--surface-2);       color: var(--muted);  border: 1px solid var(--border); }
 
-    .model-name a {
-      color: var(--text);
-      text-decoration: none;
-      font-weight: 500;
-    }
+    .model-name a { color: var(--text); text-decoration: none; font-weight: 500; }
     .model-name a:hover { color: var(--accent); text-decoration: underline; }
+    .model-name span.plain { color: var(--text); font-weight: 500; }
 
-    .quant-tag {
+    .fmt-tag {
       display: inline-block;
       background: var(--code-bg);
       border: 1px solid var(--border);
       border-radius: 4px;
       padding: 0.1rem 0.4rem;
-      font-size: 0.72rem;
+      font-size: 0.7rem;
       font-family: "SFMono-Regular", Consolas, monospace;
       color: var(--muted);
       margin-left: 0.5rem;
       vertical-align: middle;
     }
 
-    .size-cell { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
-    .params-cell { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+    .size-cell, .seeds-cell, .seen-cell { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+    .seeds-cell b { color: var(--text); font-weight: 600; }
 
-    .status-cell {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      white-space: nowrap;
-    }
-
-    .dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      flex-shrink: 0;
-      transition: background 0.3s, box-shadow 0.3s;
-    }
-    .dot.checking  { background: var(--border); }
-    .dot.available { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .status-cell { display: flex; align-items: center; gap: 0.5rem; white-space: nowrap; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; transition: background 0.3s, box-shadow 0.3s; }
+    .dot.checking    { background: var(--border); }
+    .dot.available   { background: var(--green); box-shadow: 0 0 6px var(--green); }
     .dot.unavailable { background: var(--red); }
-    .dot.partial   { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
-
-    .status-label {
-      font-size: 0.85rem;
-      color: var(--muted);
-    }
+    .dot.partial     { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+    .status-label { font-size: 0.85rem; color: var(--muted); }
     .status-label.available   { color: var(--green); }
     .status-label.unavailable { color: var(--red); }
     .status-label.partial     { color: var(--yellow); }
 
-    .dfget-col {
+    .dfget-col { max-width: 300px; }
+    .dfget-inner { display: flex; align-items: center; gap: 0.4rem; }
+    .dfget-inner code {
       font-family: "SFMono-Regular", Consolas, monospace;
-      font-size: 0.78rem;
+      font-size: 0.76rem;
       color: var(--muted);
-      max-width: 340px;
-    }
-    .dfget-col code {
-      display: block;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.25rem 0.45rem;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      flex: 1;
+      min-width: 0;
     }
-    .dfget-col code:hover { overflow: visible; white-space: normal; word-break: break-all; }
+    .dfget-col .na { color: var(--muted); font-size: 0.8rem; font-style: italic; }
+    .copy-btn {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 4px;
+      padding: 0.25rem 0.4rem;
+      font-size: 0.72rem;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.12s;
+    }
+    .copy-btn:hover { color: var(--text); border-color: var(--muted); }
+    .copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+    .empty { text-align: center; padding: 2rem; color: var(--muted); }
+    .empty.err { color: var(--red); }
 
     .legend {
-      display: flex;
-      gap: 1.25rem;
-      margin-top: 1rem;
-      font-size: 0.8rem;
-      color: var(--muted);
-      flex-wrap: wrap;
+      display: flex; gap: 1.25rem; margin-top: 1rem;
+      font-size: 0.8rem; color: var(--muted); flex-wrap: wrap;
     }
     .legend-item { display: flex; align-items: center; gap: 0.4rem; }
+
+    footer {
+      max-width: 1040px; margin: 0 auto; padding: 1.5rem 2rem 3rem;
+      color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--border);
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -212,11 +272,11 @@
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/>
     </svg>
-    dragonfly-gguf
+    dragonfly
     <span class="badge">Alpha</span>
   </a>
   <nav>
-    <a href="/" class="active">Models</a>
+    <a href="/" class="active">Registry</a>
     <a href="/about">About</a>
     <a href="https://github.com/JustDory/dragonfly-gguf-client" target="_blank" rel="noopener">GitHub</a>
   </nav>
@@ -224,148 +284,346 @@
 
 <main>
   <div class="page-header">
-    <h1>GGUF Model Registry</h1>
-    <p>Live availability across HuggingFace and P2P peers &mdash; click any model to view on HuggingFace</p>
+    <h1>Open Model Registry</h1>
+    <p>Openly-licensed models mirrored across Hugging Face and P2P peers. Click a model to view its source; copy the <code>dfget</code> command to fetch it over the swarm.</p>
+  </div>
+
+  <div id="notice" class="notice"></div>
+
+  <div class="controls">
+    <label class="search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8b949e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+      </svg>
+      <input id="search" type="search" placeholder="Search models by name…" autocomplete="off">
+    </label>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-cat="all">All</button>
+      <button class="tab" data-cat="LLM">LLM</button>
+      <button class="tab" data-cat="EMB">Embeddings</button>
+      <button class="tab" data-cat="DATA">Datasets</button>
+      <button class="tab" data-cat="APP">Apps</button>
+    </div>
+    <select class="format-select" id="format">
+      <option value="all">All formats</option>
+      <option value="GGUF">GGUF</option>
+      <option value="SAFETENSORS">SafeTensors</option>
+    </select>
   </div>
 
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>Model</th>
-          <th>Params</th>
+          <th>Type</th>
+          <th>Name</th>
           <th>Size</th>
+          <th>Seeds</th>
+          <th>Last seen</th>
           <th>Status</th>
           <th>dfget command</th>
         </tr>
       </thead>
       <tbody id="tbody">
-        <tr>
-          <td colspan="5" style="text-align:center;padding:2rem;color:var(--muted);">Checking availability…</td>
-        </tr>
+        <tr><td colspan="7" class="empty">Loading registry…</td></tr>
       </tbody>
     </table>
   </div>
 
   <div class="legend">
-    <span class="legend-item"><span class="dot available"></span> Available on HuggingFace</span>
+    <span class="legend-item"><span class="dot available"></span> Available on Hugging Face</span>
     <span class="legend-item"><span class="dot partial"></span> Peers only</span>
     <span class="legend-item"><span class="dot unavailable"></span> Unavailable</span>
     <span class="legend-item"><span class="dot checking"></span> Checking…</span>
   </div>
 </main>
 
-<script>
-const TRACKER = 'https://tracker.dragonfly-gguf.dev';
-const HF_API   = 'https://huggingface.co/api/models';
+<footer>
+  A community mirror for <strong>openly-licensed</strong> open-source models. Only models under permissive/open licenses are indexed and seeded.
+  See the <a href="/about">About page</a> for the listing policy and how to run a peer.
+</footer>
 
+<script>
+// ---- config ------------------------------------------------------------
+// The page is Hugging Face-primary (repo metadata powers links, dfget commands,
+// availability, and categories) and enriched by the tracker's /contents API for
+// live seed counts + peers-only content. nginx proxies /contents -> tracker:8080.
+const CONTENTS_URL = '/contents';
+const HF_API = 'https://huggingface.co/api/models';
+const HF_LIMIT = 60;
 const QUANT_PREFS = ['Q4_K_M','Q4_K_S','Q5_K_M','Q4_K','Q5_K','Q3_K_M','Q4_0','Q5_0','Q8_0'];
 
+// ---- state -------------------------------------------------------------
+const state = { items: [], category: 'all', format: 'all', q: '' };
+
+// ---- helpers -----------------------------------------------------------
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => (
+    { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]
+  ));
+}
 function formatBytes(n) {
   if (!n) return '—';
   return n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.round(n / 1e6) + ' MB';
 }
-
-function extractParams(repoName) {
-  const m = repoName.match(/[_-](\d+(?:\.\d+)?)[bB](?:[_-]|$)/);
-  return m ? m[1] + 'B' : '—';
+function formatSeeds(n) {
+  if (n == null) return '—';
+  return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
 }
-
-function extractQuant(filename) {
-  const m = filename.match(/[_-](Q\d[^.]+)\.gguf$/i);
-  return m ? m[1].toUpperCase() : 'GGUF';
+function relTime(ts) {
+  if (!ts) return '—';
+  const d = typeof ts === 'number' ? new Date(ts * (ts < 1e12 ? 1000 : 1)) : new Date(ts);
+  if (isNaN(d)) return '—';
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 0) return 'just now';
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  if (s < 2592000) return Math.floor(s / 86400) + 'd ago';
+  return d.toISOString().slice(0, 10);
 }
-
-function pickFilename(siblings) {
-  const ggufs = (siblings || []).filter(s => s.rfilename.toLowerCase().endsWith('.gguf'));
+function extractParams(name) {
+  const m = String(name).match(/[_-](\d+(?:\.\d+)?)[bB](?:[_-]|$)/);
+  return m ? m[1] + 'B' : null;
+}
+function fmtFromFilename(fn) {
+  const f = String(fn).toLowerCase();
+  if (f.endsWith('.gguf')) return 'GGUF';
+  if (f.endsWith('.safetensors')) return 'SAFETENSORS';
+  return '';
+}
+// Map a HF pipeline_tag (+ format fallback) to one of our four semantic categories.
+function categorize(pipelineTag, format) {
+  const t = (pipelineTag || '').toLowerCase();
+  if (t.includes('sentence-similarity') || t.includes('feature-extraction') || t.includes('embed')) return 'EMB';
+  if (t.includes('text-generation') || t.includes('text2text') || t.includes('conversational') || t.includes('question-answering')) return 'LLM';
+  if (format === 'GGUF') return 'LLM';
+  return 'MODEL';
+}
+function normCat(c) { return ['LLM','EMB','DATA','APP'].includes(c) ? c : 'MODEL'; }
+function scheme(format) { return format === 'GGUF' ? 'gguf' : 'hf'; }
+function pickGguf(siblings) {
+  const ggufs = (siblings || []).filter(s => s.rfilename && s.rfilename.toLowerCase().endsWith('.gguf'));
   for (const q of QUANT_PREFS) {
     const hit = ggufs.find(s => s.rfilename.toUpperCase().includes(q));
     if (hit) return hit.rfilename;
   }
-  return ggufs[0]?.rfilename || null;
+  return ggufs[0] ? ggufs[0].rfilename : null;
 }
 
-function setStatus(tr, state) {
-  const dot = tr.querySelector('.dot');
-  const lbl = tr.querySelector('.status-label');
-  dot.className = 'dot ' + state;
-  lbl.className = 'status-label ' + state;
-  lbl.textContent = { available: 'Available', unavailable: 'Unavailable', partial: 'Peers only', checking: 'Checking…' }[state] || state;
+// ---- load: HF-primary, tracker-enriched --------------------------------
+async function load() {
+  document.getElementById('tbody').innerHTML = '<tr><td colspan="7" class="empty">Loading registry…</td></tr>';
+  await loadHuggingFace();
+  const enriched = await enrichFromTracker();
+  if (!enriched) {
+    showNotice('<strong>Live seed counts unavailable.</strong> The P2P tracker index isn’t reachable yet — showing openly-licensed models from Hugging Face without swarm stats.');
+  } else {
+    hideNotice();
+  }
+  applyFilters();
+  runAvailabilityChecks();
 }
 
-async function init() {
-  const tbody = document.getElementById('tbody');
-  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--muted);">Loading top GGUF models from Hugging Face…</td></tr>';
-
-  let data;
+// Primary source: top openly-licensed GGUF models on Hugging Face.
+async function loadHuggingFace() {
   try {
-    const resp = await fetch(
-      `${HF_API}?filter=gguf&pipeline_tag=text-generation&sort=downloads&direction=-1&limit=50&full=true`,
+    const r = await fetch(
+      HF_API + '?filter=gguf&sort=downloads&direction=-1&limit=' + HF_LIMIT + '&full=true',
       { signal: AbortSignal.timeout(20000) }
     );
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    data = await resp.json();
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    state.items = [];
+    for (const model of data) {
+      const filename = pickGguf(model.siblings);
+      if (!filename) continue;
+      const repo = model.id;
+      const displayName = repo.split('/').pop().replace(/-GGUF$/i, '');
+      const format = 'GGUF';
+      state.items.push({
+        key: 'hf:' + repo,
+        category: normCat(categorize(model.pipeline_tag, format)),
+        format,
+        name: displayName,
+        repo,
+        filename,
+        params: extractParams(repo.split('/').pop()),
+        size: null,
+        seeds: null,
+        lastSeen: null,
+        hfUrl: 'https://huggingface.co/' + repo,
+        dfget: 'dfget --p2p-tracker ' + location.origin + ' ' + scheme(format) + '://' + repo + '/' + filename,
+        peersOnly: false,
+        status: 'checking'
+      });
+    }
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--red);">Failed to load model list: ${e.message}</td></tr>`;
+    state.items = [];
+    document.getElementById('tbody').innerHTML =
+      '<tr><td colspan="7" class="empty err">Failed to load models from Hugging Face: ' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+
+// Overlay live swarm stats from the tracker: seed counts + last-seen on matching
+// rows, and extra "peers-only" rows for content the swarm has that HF's top list doesn't.
+async function enrichFromTracker() {
+  try {
+    const url = new URL(CONTENTS_URL, location.origin);
+    url.searchParams.set('limit', '500');
+    const r = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(6000) });
+    if (!r.ok) return false;
+    const ct = r.headers.get('content-type') || '';
+    if (!ct.includes('json')) return false;
+    const data = await r.json();
+    const list = Array.isArray(data) ? data : (data.contents || data.items || []);
+    if (!Array.isArray(list)) return false;
+
+    const byFile = new Map();
+    for (const c of list) {
+      const fn = c.filename || c.name;
+      if (fn) byFile.set(fn, c);
+    }
+
+    const matched = new Set();
+    for (const it of state.items) {
+      const c = byFile.get(it.filename);
+      if (!c) continue;
+      it.seeds = c.providers ?? c.seeds ?? null;
+      it.lastSeen = c.last_seen ?? c.lastSeen ?? null;
+      if (it.size == null && c.size != null) it.size = c.size;
+      matched.add(it.filename);
+    }
+
+    for (const [fn, c] of byFile) {
+      if (matched.has(fn)) continue;
+      const format = (c.format || fmtFromFilename(fn) || '').toUpperCase();
+      state.items.push({
+        key: 'pk:' + (c.content_key || fn),
+        category: normCat(c.category ? String(c.category).toUpperCase() : (format === 'GGUF' ? 'LLM' : 'MODEL')),
+        format,
+        name: fn,
+        repo: '',
+        filename: fn,
+        params: extractParams(fn),
+        size: c.size ?? null,
+        seeds: c.providers ?? c.seeds ?? null,
+        lastSeen: c.last_seen ?? c.lastSeen ?? null,
+        hfUrl: null,
+        dfget: null,          // tracker doesn't advertise the source repo/URL
+        peersOnly: true,
+        status: 'partial'
+      });
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// ---- rendering ---------------------------------------------------------
+function applyFilters() {
+  const tbody = document.getElementById('tbody');
+  const q = state.q.trim().toLowerCase();
+  const rows = state.items.filter(it =>
+    (state.category === 'all' || it.category === state.category) &&
+    (state.format === 'all' || it.format === state.format) &&
+    (!q || it.name.toLowerCase().includes(q) || (it.repo || '').toLowerCase().includes(q))
+  );
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">No models match the current filters.</td></tr>';
     return;
   }
 
   tbody.innerHTML = '';
-  const rows = [];
-
-  for (const model of data) {
-    const filename = pickFilename(model.siblings);
-    if (!filename) continue;
-
-    const repo        = model.id;
-    const repoName    = repo.split('/').pop();
-    const displayName = repoName.replace(/-GGUF$/i, '');
-    const params      = extractParams(repoName);
-    const quant       = extractQuant(filename);
-    const url         = `gguf://${repo}/${filename}`;
-
+  for (const it of rows) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td class="model-name">
-        <a href="https://huggingface.co/${repo}" target="_blank" rel="noopener">${displayName}</a>
-        <span class="quant-tag">${quant}</span>
-      </td>
-      <td class="params-cell">${params}</td>
-      <td class="size-cell">—</td>
-      <td>
-        <div class="status-cell">
-          <span class="dot checking"></span>
-          <span class="status-label">Checking…</span>
-        </div>
-      </td>
-      <td class="dfget-col"><code>dfget --p2p-tracker ${TRACKER} ${url}</code></td>
-    `;
+    const nameCell = it.hfUrl
+      ? '<a href="' + escapeHtml(it.hfUrl) + '" target="_blank" rel="noopener">' + escapeHtml(it.name) + '</a>'
+      : '<span class="plain">' + escapeHtml(it.name) + '</span>';
+    const dfgetCell = it.dfget
+      ? '<div class="dfget-inner"><code title="' + escapeHtml(it.dfget) + '">' + escapeHtml(it.dfget) + '</code>' +
+        '<button class="copy-btn" type="button">Copy</button></div>'
+      : '<span class="na" title="Seeded by peers; the tracker does not advertise the source repository URL for this content.">source URL not published</span>';
+    tr.innerHTML =
+      '<td><span class="cat cat-' + escapeHtml(it.category) + '">' + escapeHtml(it.category) + '</span></td>' +
+      '<td class="model-name">' + nameCell +
+        (it.format ? '<span class="fmt-tag">' + escapeHtml(it.format) + '</span>' : '') +
+        (it.params ? '<span class="fmt-tag">' + escapeHtml(it.params) + '</span>' : '') + '</td>' +
+      '<td class="size-cell">' + escapeHtml(formatBytes(it.size)) + '</td>' +
+      '<td class="seeds-cell">' + (it.seeds != null ? '<b>' + escapeHtml(formatSeeds(it.seeds)) + '</b>' : '—') + '</td>' +
+      '<td class="seen-cell">' + escapeHtml(relTime(it.lastSeen)) + '</td>' +
+      '<td><div class="status-cell"><span class="dot ' + it.status + '"></span>' +
+        '<span class="status-label ' + it.status + '">' + statusLabel(it.status) + '</span></div></td>' +
+      '<td class="dfget-col">' + dfgetCell + '</td>';
+    const btn = tr.querySelector('.copy-btn');
+    if (btn) btn.addEventListener('click', () => copyCmd(btn, it.dfget));
+    it._tr = tr;
     tbody.appendChild(tr);
-    rows.push({ tr, repo, quant });
   }
+}
 
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--muted);">No GGUF models found.</td></tr>';
-    return;
+function statusLabel(s) {
+  return { available: 'Available', unavailable: 'Unavailable', partial: 'Peers only', checking: 'Checking…' }[s] || s;
+}
+
+function setStatus(it, s) {
+  it.status = s;
+  if (!it._tr) return;
+  const dot = it._tr.querySelector('.dot');
+  const lbl = it._tr.querySelector('.status-label');
+  if (dot) dot.className = 'dot ' + s;
+  if (lbl) { lbl.className = 'status-label ' + s; lbl.textContent = statusLabel(s); }
+}
+
+async function copyCmd(btn, text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    btn.textContent = 'Copied';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1400);
+  } catch {
+    btn.textContent = 'Ctrl+C';
   }
+}
 
-  // Fetch per-model blob info: fills in real file size and confirms accessibility
-  await Promise.all(rows.map(async ({ tr, repo, quant }) => {
+// Live HF availability check per model with a repo (best-effort, non-blocking).
+async function runAvailabilityChecks() {
+  await Promise.all(state.items.map(async it => {
+    if (it.peersOnly || !it.repo) return;   // peers-only rows stay "Peers only"
     try {
-      const r = await fetch(`${HF_API}/${repo}?blobs=true`, { signal: AbortSignal.timeout(12000) });
-      if (!r.ok) { setStatus(tr, 'unavailable'); return; }
-      const m = await r.json();
-      const ggufs = (m.siblings || []).filter(s => s.rfilename.toLowerCase().endsWith('.gguf'));
-      const file = ggufs.find(s => s.rfilename.toUpperCase().includes(quant)) || ggufs[0];
-      if (file) tr.querySelector('.size-cell').textContent = formatBytes(file.size || file.lfs?.size);
-      setStatus(tr, 'available');
+      const r = await fetch(HF_API + '/' + it.repo, { signal: AbortSignal.timeout(12000) });
+      setStatus(it, r.ok ? 'available' : 'unavailable');
     } catch {
-      setStatus(tr, 'unavailable');
+      setStatus(it, 'unavailable');
     }
   }));
 }
 
-init();
+// ---- notice ------------------------------------------------------------
+function showNotice(html) { const n = document.getElementById('notice'); n.innerHTML = html; n.classList.add('show'); }
+function hideNotice() { document.getElementById('notice').classList.remove('show'); }
+
+// ---- controls wiring ---------------------------------------------------
+document.getElementById('tabs').addEventListener('click', e => {
+  const btn = e.target.closest('.tab');
+  if (!btn) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === btn));
+  state.category = btn.dataset.cat;
+  applyFilters();
+});
+document.getElementById('format').addEventListener('change', e => {
+  state.format = e.target.value;
+  applyFilters();
+});
+let searchTimer;
+document.getElementById('search').addEventListener('input', e => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { state.q = e.target.value; applyFilters(); }, 180);
+});
+
+load();
 </script>
 
 </body>
