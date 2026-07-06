@@ -95,6 +95,18 @@
     .notice.show { display: block; }
     .notice strong { color: var(--text); font-weight: 600; }
 
+    .warn-banner {
+      border: 1px solid rgba(210,153,34,0.45);
+      background: rgba(210,153,34,0.08);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem;
+      color: var(--text);
+      margin-bottom: 1.5rem;
+    }
+    .warn-banner strong { color: var(--yellow); font-weight: 700; }
+    .warn-banner ul { margin: 0.4rem 0 0 1.2rem; color: var(--muted); }
+
     /* controls */
     .controls {
       display: flex;
@@ -263,6 +275,17 @@
     }
     footer a { color: var(--accent); text-decoration: none; }
     footer a:hover { text-decoration: underline; }
+    .donate { margin-top: 0.75rem; }
+    .donate code {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.72rem;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.15rem 0.4rem;
+      word-break: break-all;
+      color: var(--text);
+    }
   </style>
 </head>
 <body>
@@ -283,6 +306,17 @@
 </header>
 
 <main>
+  <div class="warn-banner">
+    <strong>⚠ Warning: seeding exposes your IP address.</strong>
+    When you seed (or download) over the P2P swarm, your IP address is visible to every other peer, and anyone monitoring the swarm can log it. Exposing your home IP address can lead to:
+    <ul>
+      <li>Targeted attacks or port scanning by malicious users in the swarm.</li>
+      <li>Your ISP throttling your connection if they detect heavy P2P traffic.</li>
+      <li>Privacy concerns, as your IP address can be used to identify your general geographic location and Internet Service Provider.</li>
+    </ul>
+    If you choose to seed, consider using a reputable VPN with a kill switch, and verify your client is bound to the VPN interface so no traffic leaks if the VPN drops.
+  </div>
+
   <div class="page-header">
     <h1>Open Model Registry</h1>
     <p>Openly-licensed models mirrored across Hugging Face and P2P peers. Click a model to view its source; copy the <code>dfget</code> command to fetch it over the swarm.</p>
@@ -340,6 +374,7 @@
 <footer>
   A community mirror for <strong>openly-licensed</strong> open-source models. Only models under permissive/open licenses are indexed and seeded.
   See the <a href="/about">About page</a> for the listing policy and how to run a peer.
+  <p class="donate">Support the mirror — XMR: <code>83wJ3qXhVJwiT3a2nVM7YfVDjbHm1yYbZewMHNwL5PD4ibmjRVc5jSN2TVXhWT4HWXJw6uL8qfVs68ydQXGQXMgF6pKgaMq</code></p>
 </footer>
 
 <script>
