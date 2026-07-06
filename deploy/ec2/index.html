@@ -353,10 +353,14 @@ const HF_DATASETS_API = 'https://huggingface.co/api/datasets';
 const GGUF_LIMIT = 45;   // top GGUF models (single-file quants)
 const SAFE_LIMIT = 25;   // top SafeTensors models (sharded, grouped per model)
 const DATA_LIMIT = 20;   // top datasets (grouped per dataset repo)
+const SEARCH_LIMIT = 30; // per-format results for a live Hugging Face search query
 const QUANT_PREFS = ['Q4_K_M','Q4_K_S','Q5_K_M','Q4_K','Q5_K','Q3_K_M','Q4_0','Q5_0','Q8_0'];
 
 // ---- state -------------------------------------------------------------
-const state = { items: [], category: 'all', format: 'all', q: '' };
+// `items` is the base top-downloads registry (loaded once). `searchItems`
+// holds extra repos pulled live from HF for the current query — only shown
+// while a query is active, so clearing the search restores the top list.
+const state = { items: [], searchItems: [], category: 'all', format: 'all', q: '', searching: false };
 
 // ---- helpers -----------------------------------------------------------
 function escapeHtml(s) {
@@ -440,13 +444,54 @@ async function load() {
   runAvailabilityChecks();
 }
 
-async function fetchHfList(filter, limit) {
-  const r = await fetch(
-    HF_API + '?filter=' + filter + '&sort=downloads&direction=-1&limit=' + limit + '&full=true',
-    { signal: AbortSignal.timeout(20000) }
-  );
+async function fetchHfList(filter, limit, search) {
+  const u = new URL(HF_API);
+  u.searchParams.set('filter', filter);
+  u.searchParams.set('sort', 'downloads');
+  u.searchParams.set('direction', '-1');
+  u.searchParams.set('limit', limit);
+  u.searchParams.set('full', 'true');
+  if (search) u.searchParams.set('search', search);
+  const r = await fetch(u, { signal: AbortSignal.timeout(20000) });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
+}
+
+async function fetchDatasetList(limit, search) {
+  const u = new URL(HF_DATASETS_API);
+  u.searchParams.set('sort', 'downloads');
+  u.searchParams.set('direction', '-1');
+  u.searchParams.set('limit', limit);
+  if (search) u.searchParams.set('search', search);
+  const r = await fetch(u, { signal: AbortSignal.timeout(20000) });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+// Build one GGUF row (best single quant file) from a HF model record, or null
+// if it has no .gguf sibling or its repo was already seen.
+function makeGgufItem(model, seen) {
+  const filename = pickGguf(model.siblings);
+  if (!filename) return null;
+  const repo = model.id;
+  if (seen.has(repo)) return null;
+  seen.add(repo);
+  const displayName = repo.split('/').pop().replace(/-GGUF$/i, '');
+  return {
+    key: 'hf:' + repo,
+    category: normCat(categorize(model.pipeline_tag, 'GGUF')),
+    format: 'GGUF',
+    name: displayName,
+    repo,
+    matchFiles: [filename],
+    shardCount: 1,
+    params: extractParams(repo.split('/').pop()),
+    size: null, seeds: null, lastSeen: null,
+    hfUrl: 'https://huggingface.co/' + repo,
+    dfget: 'dfget --p2p-tracker ' + location.origin + ' gguf://' + repo + '/' + filename,
+    peersOnly: false,
+    status: 'checking'
+  };
 }
 
 // Top GGUF models — one row per model, best single quant file.
@@ -455,97 +500,85 @@ async function loadGguf(seen, errors) {
   try { data = await fetchHfList('gguf', GGUF_LIMIT); }
   catch (e) { errors.push('GGUF: ' + e.message); return; }
   for (const model of data) {
-    const filename = pickGguf(model.siblings);
-    if (!filename) continue;
-    const repo = model.id;
-    if (seen.has(repo)) continue;
-    seen.add(repo);
-    const displayName = repo.split('/').pop().replace(/-GGUF$/i, '');
-    state.items.push({
-      key: 'hf:' + repo,
-      category: normCat(categorize(model.pipeline_tag, 'GGUF')),
-      format: 'GGUF',
-      name: displayName,
-      repo,
-      matchFiles: [filename],
-      shardCount: 1,
-      params: extractParams(repo.split('/').pop()),
-      size: null, seeds: null, lastSeen: null,
-      hfUrl: 'https://huggingface.co/' + repo,
-      dfget: 'dfget --p2p-tracker ' + location.origin + ' gguf://' + repo + '/' + filename,
-      peersOnly: false,
-      status: 'checking'
-    });
+    const it = makeGgufItem(model, seen);
+    if (it) state.items.push(it);
   }
 }
 
 // Top SafeTensors models — one row per model, ALL shards grouped. The dfget
 // command uses a repo-level hf:// URL with a trailing slash so `dfget --recursive`
 // pulls every shard (+ index/config) in a single command.
+// Build one SafeTensors row (all shards grouped) from a HF model record, or
+// null if it has no .safetensors shards or its repo was already seen.
+function makeSafetensorsItem(model, seen) {
+  const repo = model.id;
+  if (seen.has(repo)) return null;
+  const shards = (model.siblings || [])
+    .map(s => s.rfilename)
+    .filter(f => f && f.toLowerCase().endsWith('.safetensors'));
+  if (!shards.length) return null;
+  seen.add(repo);
+  const displayName = repo.split('/').pop();
+  return {
+    key: 'hf:' + repo,
+    category: normCat(categorize(model.pipeline_tag, 'SAFETENSORS')),
+    format: 'SAFETENSORS',
+    name: displayName,
+    repo,
+    matchFiles: shards,          // group: all shard files belong to this model
+    shardCount: shards.length,
+    params: extractParams(displayName),
+    size: null, seeds: null, lastSeen: null,
+    hfUrl: 'https://huggingface.co/' + repo,
+    dfget: 'dfget --p2p-tracker ' + location.origin + ' --recursive hf://' + repo + '/',
+    peersOnly: false,
+    status: 'checking'
+  };
+}
+
 async function loadSafetensors(seen, errors) {
   let data;
   try { data = await fetchHfList('safetensors', SAFE_LIMIT); }
   catch (e) { errors.push('SafeTensors: ' + e.message); return; }
   for (const model of data) {
-    const repo = model.id;
-    if (seen.has(repo)) continue;
-    const shards = (model.siblings || [])
-      .map(s => s.rfilename)
-      .filter(f => f && f.toLowerCase().endsWith('.safetensors'));
-    if (!shards.length) continue;
-    seen.add(repo);
-    const displayName = repo.split('/').pop();
-    state.items.push({
-      key: 'hf:' + repo,
-      category: normCat(categorize(model.pipeline_tag, 'SAFETENSORS')),
-      format: 'SAFETENSORS',
-      name: displayName,
-      repo,
-      matchFiles: shards,          // group: all shard files belong to this model
-      shardCount: shards.length,
-      params: extractParams(displayName),
-      size: null, seeds: null, lastSeen: null,
-      hfUrl: 'https://huggingface.co/' + repo,
-      dfget: 'dfget --p2p-tracker ' + location.origin + ' --recursive hf://' + repo + '/',
-      peersOnly: false,
-      status: 'checking'
-    });
+    const it = makeSafetensorsItem(model, seen);
+    if (it) state.items.push(it);
   }
 }
 
 // Top datasets — one row per dataset repo. The whole dataset downloads with a
 // single repo-level directory command (hf://datasets/<owner>/<name>/).
+// Build one dataset row from a HF dataset record, or null if it was already seen.
+function makeDatasetItem(ds, seen) {
+  const repo = ds.id;
+  if (!repo || seen.has('ds:' + repo)) return null;
+  seen.add('ds:' + repo);
+  const displayName = repo.includes('/') ? repo.split('/').pop() : repo;
+  return {
+    key: 'ds:' + repo,
+    category: 'DATA',
+    format: '',                  // datasets are multi-format; no single format badge
+    name: displayName,
+    repo,
+    isDataset: true,
+    matchFiles: [],
+    shardCount: 1,
+    params: null,
+    size: null, seeds: null, lastSeen: null,
+    hfUrl: 'https://huggingface.co/datasets/' + repo,
+    dfget: 'dfget --p2p-tracker ' + location.origin + ' --recursive hf://datasets/' + repo + '/',
+    peersOnly: false,
+    status: 'checking'
+  };
+}
+
 async function loadDatasets(seen, errors) {
   let data;
-  try {
-    const r = await fetch(
-      HF_DATASETS_API + '?sort=downloads&direction=-1&limit=' + DATA_LIMIT,
-      { signal: AbortSignal.timeout(20000) }
-    );
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    data = await r.json();
-  } catch (e) { errors.push('Datasets: ' + e.message); return; }
+  try { data = await fetchDatasetList(DATA_LIMIT); }
+  catch (e) { errors.push('Datasets: ' + e.message); return; }
   for (const ds of data) {
-    const repo = ds.id;
-    if (!repo || seen.has('ds:' + repo)) continue;
-    seen.add('ds:' + repo);
-    const displayName = repo.includes('/') ? repo.split('/').pop() : repo;
-    state.items.push({
-      key: 'ds:' + repo,
-      category: 'DATA',
-      format: '',                  // datasets are multi-format; no single format badge
-      name: displayName,
-      repo,
-      isDataset: true,
-      matchFiles: [],
-      shardCount: 1,
-      params: null,
-      size: null, seeds: null, lastSeen: null,
-      hfUrl: 'https://huggingface.co/datasets/' + repo,
-      dfget: 'dfget --p2p-tracker ' + location.origin + ' --recursive hf://datasets/' + repo + '/',
-      peersOnly: false,
-      status: 'checking'
-    });
+    const it = makeDatasetItem(ds, seen);
+    if (it) state.items.push(it);
   }
 }
 
@@ -616,18 +649,63 @@ async function enrichFromTracker() {
   }
 }
 
+// ---- live search -------------------------------------------------------
+// The base list only holds the top-N most-downloaded repos, so a substring
+// filter over it can't surface a less-popular (but available) model. When the
+// user types a query we hit the HF search API directly and merge any new repos
+// into `searchItems`, which applyFilters shows alongside the base list.
+let searchSeq = 0;                 // guards against out-of-order responses
+const searchCache = new Set();     // queries already fetched (lowercased)
+
+function seenRepos() {
+  const seen = new Set();
+  for (const it of state.items.concat(state.searchItems)) {
+    if (it.repo) seen.add(it.isDataset ? 'ds:' + it.repo : it.repo);
+  }
+  return seen;
+}
+
+async function searchHf(rawQ) {
+  const q = rawQ.trim();
+  if (q.length < 2 || searchCache.has(q.toLowerCase())) { applyFilters(); return; }
+  const seq = ++searchSeq;
+  state.searching = true;
+  applyFilters();                  // reflect the "Searching…" state immediately
+  const [gg, sf, dd] = await Promise.allSettled([
+    fetchHfList('gguf', SEARCH_LIMIT, q),
+    fetchHfList('safetensors', SEARCH_LIMIT, q),
+    fetchDatasetList(SEARCH_LIMIT, q),
+  ]);
+  if (seq !== searchSeq) return;   // a newer query superseded this one
+  state.searching = false;
+  searchCache.add(q.toLowerCase());
+  const seen = seenRepos();
+  const added = [];
+  if (gg.status === 'fulfilled') for (const m of gg.value) { const it = makeGgufItem(m, seen); if (it) added.push(it); }
+  if (sf.status === 'fulfilled') for (const m of sf.value) { const it = makeSafetensorsItem(m, seen); if (it) added.push(it); }
+  if (dd.status === 'fulfilled') for (const d of dd.value) { const it = makeDatasetItem(d, seen); if (it) added.push(it); }
+  state.searchItems.push(...added);
+  applyFilters();                  // render new rows (status 'checking') …
+  runAvailabilityChecks(added);    // … then confirm availability for just them
+}
+
 // ---- rendering ---------------------------------------------------------
 function applyFilters() {
   const tbody = document.getElementById('tbody');
   const q = state.q.trim().toLowerCase();
-  const rows = state.items.filter(it =>
+  // Search results augment the base list, but only while a query is active.
+  const pool = q ? state.items.concat(state.searchItems) : state.items;
+  const rows = pool.filter(it =>
     (state.category === 'all' || it.category === state.category) &&
     (state.format === 'all' || it.format === state.format) &&
     (!q || it.name.toLowerCase().includes(q) || (it.repo || '').toLowerCase().includes(q))
   );
 
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">No models match the current filters.</td></tr>';
+    const msg = q
+      ? (state.searching ? 'Searching Hugging Face…' : 'No models found for “' + escapeHtml(state.q.trim()) + '”.')
+      : 'No models match the current filters.';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">' + msg + '</td></tr>';
     return;
   }
 
@@ -693,8 +771,8 @@ function updateSizeCell(it) {
 
 // Live HF availability check per model with a repo (best-effort, non-blocking).
 // For SafeTensors models we also sum shard sizes (blobs=true) to show total size.
-async function runAvailabilityChecks() {
-  await Promise.all(state.items.map(async it => {
+async function runAvailabilityChecks(items) {
+  await Promise.all((items || state.items).map(async it => {
     if (it.peersOnly || !it.repo) return;   // peers-only rows stay "Peers only"
     const apiBase = it.isDataset ? (HF_DATASETS_API + '/') : (HF_API + '/');
     const needSize = it.format === 'SAFETENSORS' && it.size == null;
@@ -737,7 +815,12 @@ document.getElementById('format').addEventListener('change', e => {
 let searchTimer;
 document.getElementById('search').addEventListener('input', e => {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => { state.q = e.target.value; applyFilters(); }, 180);
+  const val = e.target.value;
+  searchTimer = setTimeout(() => {
+    state.q = val;
+    applyFilters();   // instant substring filter over what's already loaded …
+    searchHf(val);    // … plus a live HF query so available-but-niche models appear
+  }, 180);
 });
 
 load();
