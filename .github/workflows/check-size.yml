@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # Self-contained large-file guard. Replaces actionsdesk/lfs-warning, which
       # needed a write-scoped GITHUB_TOKEN and failed on every run with
