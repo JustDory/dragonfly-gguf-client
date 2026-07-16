@@ -10,6 +10,10 @@ This document tracks feature ideas, bug fixes, and promotional plans for the pro
 - [x] **nginx landing page + reverse proxy** — Port 80 serves `/` (model registry), `/about` (original landing page), proxies `/peers|announce|leave` → `127.0.0.1:8080`. Config deployed via `deploy/ec2/setup-nginx.sh`.
 - [x] **`/about` 404 fixed** — nginx config on the live server was missing the `location = /about` block; patched and reloaded 2026-06-21.
 - [x] **Dynamic GGUF model registry** — `index.html` replaced the hardcoded 13-model bartowski list with a live two-phase HF Hub API fetch: top-50 text-generation GGUF models by downloads (`filter=gguf&pipeline_tag=text-generation&sort=downloads&direction=-1&limit=50`), then per-model `?blobs=true` for real file sizes and availability status. Deployed commit `997c97a`.
+- [x] **All Hugging Face file formats over P2P** (PR #20) — `dfget` runs the full Iroh pipeline (peer discovery → download → sha256 verify → seed) for plain `hf://` URLs, not just `gguf://`. `gguf://` keeps its strict `.gguf` validation.
+- [x] **Self-describing swarm: announce metadata + `GET /contents`** (PR #21) — `POST /announce` carries optional `filename`/`format`/`size` (seeders derive it from the file); `GET /contents?format=&q=&limit=` lists everything seeded, most-seeded-first, with a format filter + filename search. All fields optional both ways → old/new clients and trackers interoperate.
+- [x] **Registry frontend: categories, search, datasets, SafeTensors** (`deploy/ec2/index.html`, PRs #24/#25/#27) — the static registry page gained category filters (LLM / GGUF / SafeTensors / Dataset), client-side search, dataset listings, shards grouped per model, and live seed counts pulled from the tracker's `/contents` ("tracker-enriched") alongside the HF API. This is the **Option B** frontend (enhance the static page rather than have the tracker serve HTML).
+- [x] **Deploy Tracker CI workflow** (PRs #22/#23) — builds & pushes the tracker image to `ghcr.io/justdory/dragonfly-gguf-client/tracker` and can SSH-restart the instance when `TRACKER_DEPLOY_*` secrets are set. (The live box runs the tracker as a **systemd binary behind nginx**, not compose — see deploy task below.)
 
 ---
 
@@ -31,6 +35,16 @@ This document tracks feature ideas, bug fixes, and promotional plans for the pro
 - [ ] **Make the community tracker URL the default** — `https://tracker.dragonfly-gguf.dev` should be the hardcoded default in `dfget`. New users currently get no P2P unless they specify `--p2p-tracker`. Make P2P opt-out, not opt-in.
 - [ ] **`notice.json` first broadcast** — Now that the repo is public and the update-notice channel is live, edit `notice.json` to announce the project launch / key features to any early adopters.
 
+### Multi-format registry — remaining work
+
+The frontend (categories/search/datasets/SafeTensors) and the tracker API (`/contents`, announce metadata) are both built; these close the gaps between them.
+
+- [ ] **Deploy the new tracker binary to EC2** — **This is the blocker.** The live `dragonfly-tracker` systemd binary predates `GET /contents`, so the frontend's "tracker-enriched" seed-count path currently hits an endpoint the live server doesn't serve yet. Rebuild the aarch64(-musl) binary (`deploy/ec2/build-tracker.sh`), replace `/usr/local/bin/dragonfly-tracker`, `systemctl restart dragonfly-tracker`. In-memory store → no migration; `/contents` populates within ~5 min as daemons re-announce. (Requires SSH to the box — see `deploy/ec2/deploy.sh`.)
+- [ ] **Semantic category for non-HF-sourced files** — The frontend derives categories from the HF API, so files seeded from sources *other than* Hugging Face can't be categorized that way (the whole point of the expansion). Add an optional `--category` flag on `dfget` (fixed vocabulary — decide the list, e.g. `llm`/`embedding`/`dataset`/`app`/`other`), thread it through `SeedManifest` → announce → `ContentMeta` → `ContentSummary`, and have the frontend prefer the announced `category`/`format` over HF-derived ones. `format` (file type) already flows through `/contents`; this adds the *semantic* axis.
+- [ ] **`first_seen` "uploaded" column for tracker-sourced rows** — Ready on branch `feat/announce-metadata` (commit `ecf1866`): adds a `first_seen` timestamp to the store and `/contents`. Cherry-pick into a small PR so non-HF rows can show an upload date.
+- [ ] **Leechers column** — Not started. Downloaders would announce themselves (`role: leecher`, short TTL) when `try_p2p_download` starts and `leave` when done; `GET /peers` must keep returning **seeders only**. Protocol addition.
+- [ ] **Decide the fate of the embedded tracker UI** (`ui.rs`, `feat/announce-metadata`@`ecf1866`) — An in-binary HTML registry page at `GET /`, written before the static frontend (#24/#25/#27) landed. Now redundant given the Option B frontend. **Either** drop it, **or** keep it as a no-JS fallback served on a sub-path. Do not merge it onto `/` (nginx already serves the static page there).
+
 ---
 
 ## Short-term (next 1–4 weeks)
@@ -45,6 +59,7 @@ This document tracks feature ideas, bug fixes, and promotional plans for the pro
 - [ ] **Recursive repo download** — `gguf://owner/repo/` (trailing slash) downloads all `.gguf` files in the repo. Useful for model families with multiple quant levels.
 - [ ] **Sharded / multi-part GGUF support** — Large models (70B+) are often split into multiple `.gguf` shards. Support `gguf://owner/repo/model-00001-of-00004.gguf` discovery and parallel shard download.
 - [ ] **`dfctl gguf` subcommand** — Expose GGUF-specific commands: `dfctl gguf list` (show seeded models from local registry), `dfctl gguf status` (peer counts from tracker), `dfctl gguf remove <key>` (un-seed a model).
+- [ ] **Anonymous install/update telemetry (Scarf)** — Have the installer collect anonymous usage statistics via [Scarf](https://scarf.sh) to help improve the project. **No personal data.** Events: install/update **start** + **complete**. Fields: event type, installer version, selected services, OS type (e.g. `ubuntu-24.04`), and a random per-install ID used only to correlate a start with its complete. Requirements: document it in the install docs, make it **opt-out** (e.g. `DRAGONFLY_NO_TELEMETRY=1` / `--no-telemetry`), and surface the full field list to the user before the first send. Scope: the install scripts / `docker compose` quickstart, **not** the `dfget`/`dfdaemon`/`dragonfly-tracker` binaries.
 
 ### Promotion
 
