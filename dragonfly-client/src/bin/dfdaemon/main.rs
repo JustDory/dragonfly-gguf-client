@@ -117,6 +117,34 @@ struct Args {
     no_gguf_seed: bool,
 
     #[arg(
+        long = "no-gguf-scan",
+        default_value_t = false,
+        help = "Disable scanning local inference-engine model dirs for seeding (on by default; also DRAGONFLY_GGUF_SCAN=0)"
+    )]
+    no_gguf_scan: bool,
+
+    #[arg(
+        long = "no-gguf-scan-resolve",
+        default_value_t = false,
+        help = "Disable the network name lookup that maps content-addressed stores (e.g. Ollama) and loose files to Hugging Face"
+    )]
+    no_gguf_scan_resolve: bool,
+
+    #[arg(
+        long = "gguf-scan-dir",
+        help = "Extra directory to scan for loose model files (repeatable)"
+    )]
+    gguf_scan_dir: Vec<PathBuf>,
+
+    #[arg(
+        long = "p2p-tracker",
+        default_value = "https://tracker.dragonfly-gguf.dev",
+        env = "DRAGONFLY_P2P_TRACKER",
+        help = "Tracker URL that discovered seeds are announced to"
+    )]
+    p2p_tracker: String,
+
+    #[arg(
         short = 'V',
         long = "version",
         help = "Print version information",
@@ -455,6 +483,36 @@ async fn main() -> Result<(), anyhow::Error> {
         Some(dir)
     };
 
+    // Local-model scanning: walk the model directories of popular inference
+    // engines (HF hub cache, LM Studio, llama.cpp, Jan, Ollama, ...), map each
+    // pre-downloaded model back to its Hugging Face content key, and register it
+    // as a seed. On by default whenever seeding is enabled; opt out with
+    // `--no-gguf-scan` or `DRAGONFLY_GGUF_SCAN=0`.
+    let gguf_scan_disabled =
+        args.no_gguf_scan || std::env::var_os("DRAGONFLY_GGUF_SCAN").is_some_and(|v| v == "0");
+    let gguf_scan_resolve_disabled = args.no_gguf_scan_resolve
+        || std::env::var_os("DRAGONFLY_GGUF_SCAN_RESOLVE").is_some_and(|v| v == "0");
+    let gguf_scan: Option<(PathBuf, dragonfly_client_p2p::ScanConfig)> =
+        match (gguf_seed_registry.as_ref(), gguf_scan_disabled) {
+            (Some(dir), false) => {
+                let cfg = dragonfly_client_p2p::ScanConfig {
+                    tracker_url: args.p2p_tracker.clone(),
+                    extra_dirs: args.gguf_scan_dir.clone(),
+                    resolve: !gguf_scan_resolve_disabled,
+                    ..Default::default()
+                };
+                info!(
+                    "gguf local-model scanning enabled (name lookup: {})",
+                    if cfg.resolve { "on" } else { "off" }
+                );
+                Some((dir.clone(), cfg))
+            }
+            _ => {
+                info!("gguf local-model scanning disabled");
+                None
+            }
+        };
+
     // Log dfdaemon started pid and whether it is running in container.
     info!(
         "dfdaemon started at pid {}, containerized: {}",
@@ -558,6 +616,33 @@ async fn main() -> Result<(), anyhow::Error> {
             })
         } => {
             info!("gguf seed service exited");
+        },
+
+        _ = {
+            let mut sd = shutdown.clone();
+            let tx = shutdown_complete_tx.clone();
+            let scan = gguf_scan.clone();
+            tokio::spawn(async move {
+                // Held for the lifetime of the task so graceful shutdown waits for us.
+                let _shutdown_complete = tx;
+                match scan {
+                    Some((dir, cfg)) => {
+                        if let Err(err) = dragonfly_client_p2p::run_scan_service(
+                            dir,
+                            cfg,
+                            async move { sd.recv().await },
+                        )
+                        .await
+                        {
+                            error!("gguf scan service failed: {}", err);
+                        }
+                    }
+                    // Scanning disabled: just park until shutdown.
+                    None => sd.recv().await,
+                }
+            })
+        } => {
+            info!("gguf scan service exited");
         },
 
         _ = shutdown::shutdown_signal() => {},

@@ -65,9 +65,10 @@ quantization, tensor/KV counts) via a 1 MiB range request that avoids downloadin
 
 ### Iroh P2P layer — `dragonfly-client-p2p/`
 
-A standalone crate (`src/{node,downloader,seeder,tracker}.rs`) built on `iroh` + `iroh-blobs`. Public
-API in `lib.rs`: `content_key()`, `try_p2p_download()`, `register_seed()`, `run_seed_service()`,
-`TrackerClient`, `SeedManifest`.
+A standalone crate (`src/{node,downloader,seeder,scanner,tracker}.rs`) built on `iroh` + `iroh-blobs`.
+Public API in `lib.rs`: `content_key()`, `try_p2p_download()`, `register_seed()`, `run_seed_service()`,
+`discover_seeds()`, `run_scan_service()`, `ScanConfig`, `DiscoveredSeed`, `TrackerClient`,
+`SeedManifest`.
 
 - **Content key** = `sha256_hex("hf://owner/repo/path:revision[:base_url]")` — stable and identical
   across peers for the same source object. Path is **not** lowercased (HF blobs are case-sensitive);
@@ -85,6 +86,42 @@ API in `lib.rs`: `content_key()`, `try_p2p_download()`, `register_seed()`, `run_
 
 Unlike the upstream crates (which forbid `anyhow` in library code and use `DFError`), this crate uses
 `anyhow::Result` throughout — follow the existing style within each crate.
+
+### Local engine scanning — `dragonfly-client-p2p/src/scanner.rs`
+
+Most users already have gigabytes of models on disk that they downloaded with *other* tools. The scan
+service (`run_scan_service()`, hosted by `dfdaemon` alongside the seed service) walks the well-known
+model directories of popular local inference engines, reconstructs each pre-downloaded model's Hugging
+Face content key, and writes a **seed manifest** per key into the same registry dir — so the seed
+service picks them up with no extra plumbing. On by default whenever seeding is enabled; disable with
+`--no-gguf-scan` / `DRAGONFLY_GGUF_SCAN=0`. Add extra roots with `--gguf-scan-dir` (repeatable).
+
+A seed only helps if its key equals what a downloader computes, so a file is only ever registered once
+its **exact** HF coordinates are known. The engines fall into two mapping strategies:
+
+- **Offline, exact** (`discover_seeds()`, network-free) — the on-disk layout preserves or records the
+  HF coordinate:
+  - **HF hub cache** `~/.cache/huggingface/hub/models--<org>--<repo>/snapshots/<commit>/<path>` (env
+    `HF_HUB_CACHE` / `HF_HOME` / `LLAMA_CACHE`) — shared by transformers, vLLM, TGI,
+    sentence-transformers, `huggingface-cli` and modern `llama.cpp -hf`. `refs/*` map each snapshot to
+    the revisions it answers (`main` **and** the commit hash).
+  - **LM Studio** `~/.lmstudio/models/<owner>/<repo>/<file>`.
+  - **Legacy llama.cpp cache** `~/.cache/llama.cpp/…` — recovered from the `.json` url sidecar.
+  - **Jan** `~/jan/models/**/model.json` — recovered from `sources[].url`.
+- **Network, hash-verified** (`resolver`, `--no-gguf-scan-resolve` to disable) — for content-addressed
+  or loose files with no HF coordinate in the path. It looks the model up **by name** (forward: never a
+  reverse hash search — HF has no such endpoint), then confirms by comparing the repo file's LFS
+  `sha256` (`GET /api/models/<repo>/tree/main?expand=true` → `lfs.oid`) to the local file. Seeds only on
+  an exact match:
+  - **Ollama** `~/.ollama/models` (env `OLLAMA_MODELS`): for `hf.co/…` pulls the manifest names the
+    repo (a direct lookup); the blob's `sha256-<hex>` name is its hash for free. Native
+    `registry.ollama.ai` models are Ollama's own requantizations that don't exist on the Hub, so they
+    are skipped.
+  - **Loose files** (GPT4All, oobabooga, `--gguf-scan-dir`): filename → HF search → hash confirm.
+
+Only `.gguf` + `.safetensors` above `DEFAULT_MIN_SIZE` are considered. **ModelScope** support (its
+exact on-disk cache + enabling the `ms://` P2P path) is a planned follow-up — the resolver is HF-only
+today, which is where Ollama pulls and virtually all GGUF models live.
 
 ### Discovery tracker — `dragonfly-tracker/`
 

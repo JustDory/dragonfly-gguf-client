@@ -334,6 +334,34 @@ daemon resumes serving every manifest that hasn't expired. When a manifest expir
 file is deleted), the daemon de-announces it from the tracker and removes the manifest, so peers are
 never handed a node that's about to disappear.
 
+**Seed models you already downloaded with other tools.** Alongside seeding, `dfdaemon` also scans the
+model directories of popular local inference engines, maps each pre-downloaded model back to its
+Hugging Face content key, and seeds it — so you contribute your existing library without re-downloading
+anything. Also **on by default** (whenever seeding is on). Detected automatically:
+
+| Engine / tool | Directory | How it's mapped |
+| --- | --- | --- |
+| Hugging Face hub cache — transformers, vLLM, TGI, `huggingface-cli`, modern `llama.cpp -hf` | `~/.cache/huggingface/hub` (`HF_HUB_CACHE` / `HF_HOME` / `LLAMA_CACHE`) | exact, from the `models--org--repo/snapshots/<commit>` layout |
+| LM Studio | `~/.lmstudio/models` | exact, from the `<owner>/<repo>/<file>` layout |
+| llama.cpp (legacy cache) | `~/.cache/llama.cpp` | exact, from the `.json` url sidecar |
+| Jan | `~/jan/models` | exact, from `model.json` `sources[].url` |
+| Ollama | `~/.ollama/models` (`OLLAMA_MODELS`) | `hf.co/…` pulls looked up on HF and confirmed by sha256; native models skipped |
+| GPT4All, oobabooga, `--gguf-scan-dir` | `~/.cache/gpt4all`, `~/text-generation-webui/models`, … | filename looked up on HF and confirmed by sha256 |
+
+```shell
+# Opt out of scanning (seeding stays on):
+dfdaemon --no-gguf-scan --config /path/to/config.yaml
+# or: DRAGONFLY_GGUF_SCAN=0 dfdaemon --config /path/to/config.yaml
+
+# Add extra directories, or turn off the network name lookup (Ollama/loose files):
+dfdaemon --gguf-scan-dir /data/models --no-gguf-scan-resolve --config /path/to/config.yaml
+```
+
+Only `.gguf` and `.safetensors` files are seeded, and a file is registered **only** once its exact
+Hugging Face coordinates are known — either because the on-disk layout preserves them, or because a
+forward name lookup on Hugging Face confirms the file by comparing sha256 hashes. Nothing that can't be
+matched is ever announced.
+
 **One-command full stack.** To bring up a tracker, a Dragonfly seed daemon, and the required
 control-plane services (manager, scheduler, Redis, MySQL) together:
 

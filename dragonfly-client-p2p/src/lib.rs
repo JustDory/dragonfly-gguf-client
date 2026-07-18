@@ -1,8 +1,10 @@
 mod downloader;
 mod node;
+mod scanner;
 mod seeder;
 mod tracker;
 
+pub use scanner::{discover_seeds, run_scan_service, DiscoveredSeed, ScanConfig};
 pub use seeder::{default_registry_dir, register_seed, run_seed_service, SeedManifest};
 pub use tracker::{FileMeta, TrackerClient};
 
